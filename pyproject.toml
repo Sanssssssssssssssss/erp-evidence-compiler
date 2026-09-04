@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "erp-evidence-compiler"
+version = "0.1.0"
+description = "Durable evidence-review child run for high-risk ERP actions"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "openai>=2.40,<3",
+  "openai-agents>=0.17.4,<0.18",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+probe = [
+  "tau-ai @ git+https://github.com/Sanssssssssssssssss/pi-harness-python.git@7858de22f0e5134188dafe3923d7ec8a90018097",
+]
+
+[tool.setuptools.packages.find]
+where = ["backend", "src"]
+include = ["app*", "erp_agent_odoo*"]
+
+[tool.setuptools.package-data]
+"app.compiler_runtime" = ["prompts/*.md"]
+"erp_agent_odoo.capabilities" = ["proof_templates.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["backend", "src"]
+testpaths = [
+  "tests/compiler_child",
+  "tests/compiler_v1/execution_repair",
+  "tests/compiler_v1/proof_corpus",
+  "tests/compiler_v1/test_phase4_durable_child.py",
+]
+addopts = "-p no:cacheprovider"

@@ -1,0 +1,879 @@
+{
+  "schema_version": 1,
+  "erp_bench_commit": "ceba3880af555129b5278e056a0c20f2fb5a0ba9",
+  "cases": [
+    {
+      "scenario_id": "2032_medium_05_screened_buy_only_all_seeded",
+      "scenario_number": 2032,
+      "name": "Heavy-Duty Specimen Prep Bench",
+      "role": "core_design",
+      "family": "screened seeded buy-only",
+      "runtime_sources": [
+        {
+          "path": "tasks_ui/2032_medium_05_screened_buy_only_all_seeded/instruction.md",
+          "sha256": "d1304ce7700b7341e8b70da7c84366779a37feaedf8918a13ab1d9547c9b2450",
+          "role": "human business instruction"
+        },
+        {
+          "path": "tasks_ui/2032_medium_05_screened_buy_only_all_seeded/environment/scenario_data.json",
+          "sha256": "14ea9401946ea823736976f37add2ea4f73dd700d12f3c4f21c2bd7f030bc878",
+          "role": "seeded structured scenario"
+        }
+      ],
+      "audit_sources": [
+        {
+          "path": "tasks_ui/2032_medium_05_screened_buy_only_all_seeded/tests/checks.py",
+          "sha256": "88ad0ba0ee71348ef5d952cc24bac18faece2e4360b599f3c6d49d7b4ef788fe"
+        },
+        {
+          "path": "tasks_ui/2032_medium_05_screened_buy_only_all_seeded/tests/test.sh",
+          "sha256": "301d697fcb0aa2e5dae802cd08d4ccf95b48bf3af206ab5946f81855f71e7353"
+        },
+        {
+          "path": "tasks_ui/2032_medium_05_screened_buy_only_all_seeded/solution/optimal_plan.json",
+          "sha256": "914e137a4fc36e44d854b4fe000d429e751b5111d710f5b8a7cc757d315670b7"
+        }
+      ],
+      "templates": [
+        "sales_order_disposition.v1"
+      ],
+      "protected_actions": [
+        "sale.order.action_confirm",
+        "sale.order.action_cancel"
+      ],
+      "policy_parameters": {
+        "objective_kind": "min_new_spend",
+        "product_code": "PEA51ED26F3-LAB-HSP-009",
+        "list_price": 2095.12,
+        "budget_must_cover_full_list_price": true,
+        "min_quantity": 17,
+        "max_quantity": 25,
+        "min_lead_days": 10,
+        "active_acceptance_predicates": ["budget_covers_list", "quantity_range", "minimum_lead_days"],
+        "finished_stock": 72,
+        "manufacturing_allowed": false
+      },
+      "candidate_fixture_visibility": "audit_only; runtime must supply a separately hashed Manager proposal",
+      "audit_candidate_proposal": {
+        "confirm_order_refs": [
+          "rEA51ED26F3_o04",
+          "rEA51ED26F3_o07",
+          "rEA51ED26F3_o08"
+        ],
+        "cancel_order_refs": [
+          "rEA51ED26F3_o01",
+          "rEA51ED26F3_o02",
+          "rEA51ED26F3_o03",
+          "rEA51ED26F3_o05",
+          "rEA51ED26F3_o06"
+        ],
+        "accepted_units": 71,
+        "new_supply_required": false
+      },
+      "action_dag": {
+        "bindings": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
+        "shared_nodes": ["portfolio_plan_valid", "lineage_closure_valid"],
+        "nodes": [
+          {"id": "screen_orders", "template": "sales_order_disposition.v1", "targets": "all eight seeded task orders"}
+        ],
+        "edges": [
+          {"from": ["portfolio_plan_valid", "lineage_closure_valid"], "to": "screen_orders", "condition": "confirm subset only"}
+        ],
+        "independent_branch": "screen_orders.cancel subset does not depend on supply feasibility"
+      },
+      "required_runtime_snapshot": [
+        "sale.order identity/state/write_date/client_order_ref/partner_id/commitment_date",
+        "sale.order.line product_id/product_uom_qty/price_unit",
+        "product list_price/routes",
+        "customer admitted budget and request",
+        "finished stock quantity"
+      ],
+      "verifier_alignment": {
+        "action_gate": [
+          "list_price",
+          "budget_compliance",
+          "finished_stock_capacity_compliance",
+          "supply_coverage"
+        ],
+        "post_action": [
+          "demand_coverage",
+          "deadline_fulfillment",
+          "task_state_transitions_completed",
+          "seeded_order_confirmed",
+          "seeded_order_cancelled"
+        ],
+        "benchmark_only": [
+          "has_relevant_activity",
+          "adjacent_data_untouched",
+          "optimality_snapshot_ready"
+        ]
+      },
+      "counterfactuals": [
+        {
+          "id": "stale_seeded_order",
+          "mutation": "Change one target state or write_date after snapshot.",
+          "breaks_checks": ["target_is_unique_fresh_reviewable_so"]
+        },
+        {
+          "id": "wrong_order_identity",
+          "mutation": "Swap one target customer or product.",
+          "breaks_checks": ["request_identity_matches_order", "cancel_target_is_unlocked_and_scope_exact"]
+        },
+        {
+          "id": "proposal_supplies_its_own_policy",
+          "mutation": "Replace the registered minimum quantity with 15 in the proposal.",
+          "breaks_checks": ["acceptance_policy_is_admitted"]
+        },
+        {
+          "id": "quantity_boundary_flip",
+          "mutation": "Treat a 16-unit request as accepted.",
+          "breaks_checks": ["acceptance_predicates_match_requested_action", "proposal_matches_policy_outcome"]
+        },
+        {
+          "id": "budget_failure_confirmed",
+          "mutation": "Confirm an order whose budget is below quantity times list price.",
+          "breaks_checks": ["acceptance_predicates_match_requested_action", "proposal_matches_policy_outcome"]
+        },
+        {
+          "id": "portfolio_stock_shortfall",
+          "mutation": "Reduce admitted stock below accepted units without a supply plan.",
+          "breaks_checks": ["confirm_payload_and_supply_are_valid", "portfolio_plan_valid"]
+        },
+        {
+          "id": "cancel_valid_order",
+          "mutation": "Move one passing order into the cancellation set.",
+          "breaks_checks": ["proposal_matches_policy_outcome", "cancel_target_is_unlocked_and_scope_exact"]
+        },
+        {
+          "id": "cancel_locked_order",
+          "mutation": "Lock a failing sale order before cancellation.",
+          "breaks_checks": ["cancel_target_is_unlocked_and_scope_exact"]
+        }
+      ],
+      "audit_expectation": {
+        "visibility": "audit_only",
+        "confirmed_seeded_orders": 3,
+        "cancelled_seeded_orders": 5,
+        "active_demand": 71,
+        "purchase_orders": 0,
+        "manufacturing_orders": 0
+      }
+    },
+    {
+      "scenario_id": "2016_easy_03_buy_only_fixed_downpayment",
+      "scenario_number": 2016,
+      "name": "Accumulation Zone Conveyor",
+      "role": "core_design",
+      "family": "buy-only fixed down-payment invoicing",
+      "runtime_sources": [
+        {
+          "path": "tasks_ui/2016_easy_03_buy_only_fixed_downpayment/instruction.md",
+          "sha256": "71cfebd53cec2b4640f11f9cb9f6f14ca770578173fbf3f3d7fe7878fc8aebbc",
+          "role": "human business instruction"
+        },
+        {
+          "path": "tasks_ui/2016_easy_03_buy_only_fixed_downpayment/environment/scenario_data.json",
+          "sha256": "42cf8e9ebe37df6d00346f9a1e10a931b1a9ec21cb2b3f2983c8823efb5c2195",
+          "role": "seeded structured scenario"
+        }
+      ],
+      "audit_sources": [
+        {
+          "path": "tasks_ui/2016_easy_03_buy_only_fixed_downpayment/tests/checks.py",
+          "sha256": "79e43e381d41eceba69f1b227e1939582f9e3581f5d74e6b530bcc6447e0002b"
+        },
+        {
+          "path": "tasks_ui/2016_easy_03_buy_only_fixed_downpayment/tests/test.sh",
+          "sha256": "a257d14ecafeb87afbb1d977e6279ce48be4b1896b85ed896303515a173b7050"
+        },
+        {
+          "path": "tasks_ui/2016_easy_03_buy_only_fixed_downpayment/solution/optimal_plan.json",
+          "sha256": "dbe7eb67c698db5db204f03bbcecad9a98a6524c5219d2552d6d16d68d8c72f6"
+        }
+      ],
+      "templates": [
+        "sales_order_release.v1",
+        "purchase_order_release.v1",
+        "customer_invoice_post.v1"
+      ],
+      "protected_actions": [
+        "sale.order.action_confirm",
+        "purchase.order.button_confirm",
+        "account.move.action_post"
+      ],
+      "policy_parameters": {
+        "objective_kind": "constraint_only",
+        "product_code": "P2677F01DC1-CNV-AZC-005",
+        "list_price": 3965.36,
+        "customer_budget_caps": {
+          "r2677F01DC1_c01": 4216.61,
+          "r2677F01DC1_c02": 13127.95,
+          "r2677F01DC1_c03": 33660.17,
+          "r2677F01DC1_c04": 50417.20
+        },
+        "finished_stock": 21,
+        "minimum_new_spend_margin": 0.292,
+        "payment_term": "net_30",
+        "downpayment_threshold_untaxed": 6000.0,
+        "downpayment_mode": "fixed_amount",
+        "downpayment_value": 250.0,
+        "currency_tolerance": 0.01,
+        "tax_basis": "current SO lines, product taxes and fiscal position"
+      },
+      "candidate_fixture_visibility": "audit_only; runtime must supply a separately hashed Manager proposal",
+      "audit_candidate_proposal": {
+        "sales_orders_to_confirm": 4,
+        "purchase_actions": [
+          {
+            "plan_ref": "po:finished:r2677F01DC1_q01:P2677F01DC1-CNV-AZC-005:11:2235.93:5",
+            "vendor_ref": "r2677F01DC1_q01",
+            "product_code": "P2677F01DC1-CNV-AZC-005",
+            "quantity": 12,
+            "unit_cost": 2235.93,
+            "planned_arrival_days": 6,
+            "origin_customer_refs": ["r2677F01DC1_c04"]
+          }
+        ],
+        "invoice_flows": {
+          "r2677F01DC1_c01": "regular:3965.36",
+          "r2677F01DC1_c02": "downpayment:250.00 then regular:11646.08",
+          "r2677F01DC1_c03": "downpayment:250.00 then regular:31472.88",
+          "r2677F01DC1_c04": "downpayment:250.00 then regular:47334.32"
+        }
+      },
+      "action_dag": {
+        "bindings": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
+        "shared_nodes": ["portfolio_plan_valid", "lineage_closure_valid", "supply_plan_released_checkpoint"],
+        "nodes": [
+          {"id": "release_sales", "template": "sales_order_release.v1", "targets": "four request-bound quotations"},
+          {"id": "release_purchase", "template": "purchase_order_release.v1", "targets": "audit_candidate_proposal.purchase_actions"},
+          {"id": "post_downpayments", "template": "customer_invoice_post.v1", "stage": "downpayment", "targets": ["r2677F01DC1_c02", "r2677F01DC1_c03", "r2677F01DC1_c04"]},
+          {"id": "post_regular_invoices", "template": "customer_invoice_post.v1", "stage": "regular", "targets": ["r2677F01DC1_c01", "r2677F01DC1_c02", "r2677F01DC1_c03", "r2677F01DC1_c04"]}
+        ],
+        "edges": [
+          {"from": ["portfolio_plan_valid", "lineage_closure_valid"], "to": "release_sales"},
+          {"from": ["portfolio_plan_valid", "lineage_closure_valid"], "to": "release_purchase"},
+          {"from": ["release_sales", "release_purchase"], "to": "supply_plan_released_checkpoint"},
+          {"from": ["supply_plan_released_checkpoint"], "to": "post_downpayments"},
+          {"from": ["supply_plan_released_checkpoint"], "to": "post_regular_invoices", "condition": "regular_only order"},
+          {"from": ["post_downpayments"], "to": "post_regular_invoices", "condition": "same order balance"}
+        ]
+      },
+      "required_runtime_snapshot": [
+        "sale.order and lines including state/partner/payment_term/amount_untaxed/write_date",
+        "purchase.order and lines including vendor/offer/quantity/price/date/origin/state/write_date",
+        "account.move and lines including state/move_type/partner/payment_term/amounts/taxes/sale_line_ids/write_date",
+        "stock, vendor offers, dates, budgets and policy version"
+      ],
+      "verifier_alignment": {
+        "action_gate": [
+          "list_price",
+          "budget_compliance",
+          "retained_order_has_expected_payment_term",
+          "regular_invoice_amount_matches_policy",
+          "downpayment_invoice_amount_matches_policy",
+          "linked_posted_invoices_are_tax_free",
+          "po_delivery_schedule_compliance",
+          "po_consolidation_compliance",
+          "po_min_qty_compliance",
+          "po_price_tier_compliance",
+          "new_spend_margin_policy"
+        ],
+        "post_action": [
+          "so_confirmed",
+          "retained_order_has_expected_invoice_flow",
+          "linked_posted_invoices_match_order_partner",
+          "linked_posted_invoices_have_expected_payment_term",
+          "demand_coverage",
+          "deadline_fulfillment"
+        ],
+        "benchmark_only": [
+          "adjacent_data_untouched",
+          "optimality_snapshot_ready"
+        ]
+      },
+      "counterfactuals": [
+        {
+          "id": "stale_commercial_document",
+          "mutation": "Change a target SO, PO or invoice after snapshot.",
+          "breaks_checks": [
+            "target_is_unique_fresh_draft_so",
+            "target_is_unique_fresh_draft_po",
+            "target_is_unique_fresh_draft_customer_invoice"
+          ]
+        },
+        {
+          "id": "wrong_customer_or_product",
+          "mutation": "Link a proposal document to a different task customer or product.",
+          "breaks_checks": ["request_identity_matches_order", "invoice_identity_and_lineage_match_order"]
+        },
+        {
+          "id": "wrong_sales_terms",
+          "mutation": "Change list price, budget total or SO payment term.",
+          "breaks_checks": ["commercial_terms_match_policy", "payment_term_matches_policy"]
+        },
+        {
+          "id": "late_or_uncovered_sale",
+          "mutation": "Confirm a sale whose linked supply arrives after its deadline.",
+          "breaks_checks": ["commitment_is_feasible", "portfolio_plan_valid"]
+        },
+        {
+          "id": "invalid_vendor_offer",
+          "mutation": "Use a missing/forbidden vendor tier or wrong tier price.",
+          "breaks_checks": ["vendor_offer_is_allowed", "quantity_and_price_match_tier"]
+        },
+        {
+          "id": "bad_purchase_date_or_origin",
+          "mutation": "Set receipt after need date or remove its SO origin.",
+          "breaks_checks": ["delivery_date_is_feasible", "lineage_closure_valid"]
+        },
+        {
+          "id": "orphan_invoice",
+          "mutation": "Post a draft customer invoice not linked to the retained confirmed SO.",
+          "breaks_checks": ["invoice_identity_and_lineage_match_order", "invoice_scope_is_exact", "supply_plan_released_checkpoint"]
+        },
+        {
+          "id": "wrong_invoice_term",
+          "mutation": "Use Immediate Payment instead of 30 Days.",
+          "breaks_checks": ["payment_term_matches_policy"]
+        },
+        {
+          "id": "regular_before_downpayment",
+          "mutation": "Post the balance invoice before the required down payment.",
+          "breaks_checks": ["invoice_stage_preconditions_hold"]
+        },
+        {
+          "id": "wrong_invoice_amount",
+          "mutation": "Change a down payment or balance by one currency cent.",
+          "breaks_checks": ["invoice_amount_matches_mode_and_value"]
+        },
+        {
+          "id": "unexpected_tax",
+          "mutation": "Add a tax to one invoice line.",
+          "breaks_checks": ["invoice_taxes_match_odoo_computation"]
+        },
+        {
+          "id": "native_post_blocker",
+          "mutation": "Remove the journal, partner or active account needed by Odoo posting.",
+          "breaks_checks": ["invoice_is_natively_postable"]
+        }
+      ],
+      "audit_expectation": {
+        "visibility": "audit_only",
+        "confirmed_sales_orders": 4,
+        "active_purchase_orders": 1,
+        "posted_customer_invoices": 7,
+        "downpayment_invoices": 3,
+        "regular_invoices": 4
+      }
+    },
+    {
+      "scenario_id": "2272_easy_repair_plan_easy",
+      "scenario_number": 2272,
+      "name": "Desktop Privacy Screen",
+      "role": "core_design",
+      "family": "supplier-cancellation repair",
+      "runtime_sources": [
+        {
+          "path": "tasks_ui/2272_easy_repair_plan_easy/instruction.md",
+          "sha256": "9d027b3cc3f4bee5b75c645c23ab700d2b929942634777fa401c9eb528db93a0",
+          "role": "human business instruction"
+        },
+        {
+          "path": "tasks_ui/2272_easy_repair_plan_easy/environment/scenario_data.json",
+          "sha256": "78fe74f004543080c71adb51b530187de516120f15d32e929fa1f10345a20dc7",
+          "role": "seeded structured scenario including repair_context"
+        }
+      ],
+      "audit_sources": [
+        {
+          "path": "tasks_ui/2272_easy_repair_plan_easy/tests/checks.py",
+          "sha256": "b8155ec2b97facc7a69dffdf6b290d021f3fe6b5919278e3dd0313156e7935b2"
+        },
+        {
+          "path": "tasks_ui/2272_easy_repair_plan_easy/tests/test.sh",
+          "sha256": "3a8e2e30f510a531bb0548e91069e2f6cd80f33749c20c9f2e8cc8a65b1465c5"
+        },
+        {
+          "path": "tasks_ui/2272_easy_repair_plan_easy/solution/optimal_plan.json",
+          "sha256": "44b0c433f8e37c77c2427670fdf9ea2aa9e9825d3a66066f001221f03b6b2635"
+        }
+      ],
+      "templates": [
+        "cancel_and_repair_supply.v1",
+        "purchase_order_release.v1"
+      ],
+      "protected_actions": [
+        "purchase.order.button_cancel",
+        "purchase.order.button_confirm"
+      ],
+      "policy_parameters": {
+        "objective_kind": "repair_plan",
+        "product_code": "PBE8096A0A8-SPP-DPS-005",
+        "finished_stock": 3,
+        "minimum_new_spend_margin": 0.282,
+        "repair_kind": "supplier_cancellation",
+        "broken_purchase_order_ref": "rBE8096A0A8_po02",
+        "broken_vendor_ref": "rBE8096A0A8_q01",
+        "preserve_unaffected_commitments_first": true,
+        "secondary_objective": "minimize_new_spend"
+      },
+      "candidate_fixture_visibility": "audit_only; runtime must supply a separately hashed Manager proposal",
+      "audit_candidate_proposal": {
+        "cancel_purchase_order_refs": ["rBE8096A0A8_po02"],
+        "retain_sales_order_refs": [
+          "rBE8096A0A8_o01",
+          "rBE8096A0A8_o02",
+          "rBE8096A0A8_o03",
+          "rBE8096A0A8_o04"
+        ],
+        "replacement_rule": "cover the broken path without reusing rBE8096A0A8_q01 while preserving feasible commitments",
+        "replacement_purchase_actions": [
+          {
+            "plan_ref": "po:finished:rBE8096A0A8_q02:PBE8096A0A8-SPP-DPS-005:5:172.07:5",
+            "vendor_ref": "rBE8096A0A8_q02",
+            "quantity": 5,
+            "unit_cost": 172.07,
+            "planned_arrival_days": 7,
+            "origin_customer_refs": ["rBE8096A0A8_c01"]
+          },
+          {
+            "plan_ref": "po:finished:rBE8096A0A8_q04:PBE8096A0A8-SPP-DPS-005:8:142.95:8",
+            "vendor_ref": "rBE8096A0A8_q04",
+            "quantity": 24,
+            "unit_cost": 142.95,
+            "planned_arrival_days": 8,
+            "origin_customer_refs": ["rBE8096A0A8_c02", "rBE8096A0A8_c03", "rBE8096A0A8_c04"]
+          }
+        ]
+      },
+      "action_dag": {
+        "bindings": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
+        "shared_nodes": ["portfolio_plan_valid", "lineage_closure_valid"],
+        "nodes": [
+          {"id": "cancel_broken_po", "template": "cancel_and_repair_supply.v1", "stage": "cancel", "targets": ["rBE8096A0A8_po02"]},
+          {"id": "release_replacement_plan", "template": "purchase_order_release.v1", "stage": "replacement_release", "targets": "audit_candidate_proposal.replacement_purchase_actions"}
+        ],
+        "edges": [
+          {
+            "from": ["cancel_broken_po", "portfolio_plan_valid", "lineage_closure_valid"],
+            "to": "release_replacement_plan",
+            "required_postconditions": ["disrupted_commitment_is_cancelled"]
+          }
+        ]
+      },
+      "required_runtime_snapshot": [
+        "purchase.order state/locked/write_date/vendor/origin/invoice_ids/picking_ids and lines",
+        "related vendor bill states and receipt states",
+        "seeded sales and purchase commitments",
+        "repair_context, stock, all admitted alternative offers and deadlines"
+      ],
+      "verifier_alignment": {
+        "action_gate": [
+          "po_delivery_schedule_compliance",
+          "po_consolidation_compliance",
+          "po_min_qty_compliance",
+          "po_price_tier_compliance",
+          "po_origin_traceability",
+          "supply_coverage",
+          "new_spend_margin_policy"
+        ],
+        "post_action": [
+          "repair_state_compliance",
+          "seeded_order_confirmed",
+          "demand_coverage",
+          "deadline_fulfillment"
+        ],
+        "benchmark_only": [
+          "adjacent_data_untouched",
+          "optimality_snapshot_ready"
+        ]
+      },
+      "counterfactuals": [
+        {
+          "id": "wrong_cancel_target",
+          "mutation": "Cancel an unaffected PO instead of the repair_context target.",
+          "breaks_checks": ["target_is_exact_disrupted_commitment", "cancellation_scope_is_exact"]
+        },
+        {
+          "id": "native_cancel_blocker",
+          "mutation": "Lock the PO or post its vendor bill. A completed receipt blocks only when an admitted business-safety policy says so.",
+          "breaks_checks": ["target_is_fresh_and_natively_cancellable"]
+        },
+        {
+          "id": "reuse_broken_offer",
+          "mutation": "Route replacement demand back to the cancelled supplier offer.",
+          "breaks_checks": ["replacement_avoids_broken_path", "vendor_offer_is_allowed"]
+        },
+        {
+          "id": "discard_unaffected_commitment",
+          "mutation": "Cancel a still-feasible seeded PO.",
+          "breaks_checks": ["cancellation_scope_is_exact", "portfolio_plan_valid"]
+        },
+        {
+          "id": "replacement_shortfall",
+          "mutation": "Reduce replacement supply below affected demand.",
+          "breaks_checks": ["portfolio_plan_valid"]
+        },
+        {
+          "id": "replacement_bad_tier",
+          "mutation": "Use a quantity below offer minimum or a non-tier price.",
+          "breaks_checks": ["quantity_and_price_match_tier", "portfolio_plan_valid"]
+        },
+        {
+          "id": "replacement_late_or_orphaned",
+          "mutation": "Set delivery after need date or remove SO origins.",
+          "breaks_checks": ["delivery_date_is_feasible", "lineage_closure_valid"]
+        },
+        {
+          "id": "dominated_repair",
+          "mutation": "Choose a higher-spend repair while preserving no additional commitment.",
+          "breaks_checks": ["portfolio_plan_valid"]
+        },
+        {
+          "id": "stale_replacement_rfq",
+          "mutation": "Change a replacement RFQ after it was reviewed.",
+          "breaks_checks": ["target_is_unique_fresh_draft_po"]
+        }
+      ],
+      "audit_expectation": {
+        "visibility": "audit_only",
+        "cancelled_broken_purchase_orders": 1,
+        "retained_confirmed_sales_orders": 4,
+        "active_finished_purchase_orders": 2,
+        "broken_offer_reused": false
+      }
+    },
+    {
+      "scenario_id": "2053_medium_07_screened_buy_only_mixed_seeded_invoicing",
+      "scenario_number": 2053,
+      "name": "Split System Heat Pump 5-Ton",
+      "role": "composition_audit",
+      "family": "mixed screening plus invoicing",
+      "runtime_sources": [
+        {
+          "path": "tasks_ui/2053_medium_07_screened_buy_only_mixed_seeded_invoicing/instruction.md",
+          "sha256": "7e232e48e1b527a8b59228fc2424077e833c94971d30a8222e2a507f2847edba",
+          "role": "human business instruction"
+        },
+        {
+          "path": "tasks_ui/2053_medium_07_screened_buy_only_mixed_seeded_invoicing/environment/scenario_data.json",
+          "sha256": "fdd757c13ab2be658092c71269e10cb25284bc2fce8c469c2e6cf5df17fabe2c",
+          "role": "seeded structured scenario"
+        }
+      ],
+      "audit_sources": [
+        {
+          "path": "tasks_ui/2053_medium_07_screened_buy_only_mixed_seeded_invoicing/tests/checks.py",
+          "sha256": "816c9d99d998daac8d31a10952e0fc0299fe5eead6de1970823aec4c764e4475"
+        },
+        {
+          "path": "tasks_ui/2053_medium_07_screened_buy_only_mixed_seeded_invoicing/tests/test.sh",
+          "sha256": "66fcd8c20798b41c041aceb1395f48dda7e4bfbb02b6ad1a4a7c2af04877c2a4"
+        },
+        {
+          "path": "tasks_ui/2053_medium_07_screened_buy_only_mixed_seeded_invoicing/solution/optimal_plan.json",
+          "sha256": "c120809bf6972f2f39324420317908ce5c38cdd18ebb53f21504b179d8ebf1cf"
+        }
+      ],
+      "templates": [
+        "sales_order_disposition.v1",
+        "sales_order_release.v1",
+        "customer_invoice_post.v1"
+      ],
+      "protected_actions": [
+        "sale.order.action_confirm",
+        "sale.order.action_cancel",
+        "account.move.action_post"
+      ],
+      "policy_parameters": {
+        "objective_kind": "min_new_spend",
+        "product_code": "P47CECE4885-HVC-SHP-002",
+        "list_price": 5211.72,
+        "customer_budget_caps": {
+          "r47CECE4885_c01": 90781.23,
+          "r47CECE4885_c02": 98952.46,
+          "r47CECE4885_c03": 86223.96,
+          "r47CECE4885_c04": 109554.13,
+          "r47CECE4885_c05": 79231.56,
+          "r47CECE4885_c06": 92359.47,
+          "r47CECE4885_c07": 79960.44,
+          "r47CECE4885_c08": 123931.71,
+          "r47CECE4885_c09": 93813.59
+        },
+        "min_quantity": 17,
+        "max_quantity": 21,
+        "min_lead_days": 12,
+        "active_acceptance_predicates": ["quantity_range", "minimum_lead_days"],
+        "payment_term": "net_30",
+        "invoice_flow": "one_regular_invoice_per_retained_order",
+        "tax_basis": "current SO lines, product taxes and fiscal position",
+        "rejected_orders_must_not_be_invoiced": true
+      },
+      "candidate_fixture_visibility": "audit_only; runtime must supply a separately hashed Manager proposal",
+      "audit_candidate_proposal": {
+        "accepted_request_refs": ["r47CECE4885_c09"],
+        "cancel_seeded_count": 4,
+        "skip_prompt_count": 4,
+        "regular_invoices_to_post": 1
+      },
+      "action_dag": {
+        "bindings": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
+        "shared_nodes": ["portfolio_plan_valid", "lineage_closure_valid", "supply_plan_released_checkpoint"],
+        "nodes": [
+          {"id": "screen_orders", "template": "sales_order_disposition.v1", "targets": "all nine task requests"},
+          {"id": "release_prompt_sale", "template": "sales_order_release.v1", "targets": ["r47CECE4885_c09"]},
+          {"id": "post_retained_invoice", "template": "customer_invoice_post.v1", "stage": "regular", "targets": ["r47CECE4885_c09"]}
+        ],
+        "edges": [
+          {"from": ["screen_orders", "portfolio_plan_valid", "lineage_closure_valid"], "to": "release_prompt_sale", "condition": "accepted subset only"},
+          {"from": ["release_prompt_sale"], "to": "supply_plan_released_checkpoint"},
+          {"from": ["supply_plan_released_checkpoint"], "to": "post_retained_invoice"}
+        ]
+      },
+      "required_runtime_snapshot": [
+        "all seeded and prompt order identities plus per-request quantity/deadline/pretax budget",
+        "target product list_price and retained SO price_unit/amount_untaxed",
+        "retained sale order plus invoice state/move_type/partner/payment term/amount/tax/SO-lineage/write_date",
+        "stock and policy version"
+      ],
+      "verifier_alignment": {
+        "action_gate": [
+          "retained_order_has_expected_payment_term",
+          "rejected_order_not_invoiced"
+        ],
+        "post_action": [
+          "task_state_transitions_completed",
+          "retained_order_has_expected_invoice_flow",
+          "seeded_order_cancelled",
+          "demand_coverage",
+          "linked_posted_invoices_match_order_partner"
+        ],
+        "benchmark_only": [
+          "has_relevant_activity",
+          "adjacent_data_untouched",
+          "optimality_snapshot_ready"
+        ]
+      },
+      "counterfactuals": [
+        {
+          "id": "invoice_rejected_order",
+          "mutation": "Include a cancelled or skipped request in invoice targets.",
+          "breaks_checks": ["proposal_matches_policy_outcome", "invoice_scope_is_exact"]
+        },
+        {
+          "id": "compose_with_stale_retained_order",
+          "mutation": "Change the retained SO after disposition and before invoice review.",
+          "breaks_checks": ["target_is_unique_fresh_draft_customer_invoice", "invoice_identity_and_lineage_match_order", "supply_plan_released_checkpoint"]
+        },
+        {
+          "id": "duplicate_retained_invoice",
+          "mutation": "Post a second regular invoice for the one retained order.",
+          "breaks_checks": ["invoice_stage_preconditions_hold", "invoice_scope_is_exact"]
+        }
+      ],
+      "audit_expectation": {
+        "visibility": "audit_only",
+        "accepted_requests": 1,
+        "rejected_requests": 8,
+        "posted_customer_invoices": 1
+      }
+    },
+    {
+      "scenario_id": "2217_medium_22_single_bom_split_by_capacity_invoicing",
+      "scenario_number": 2217,
+      "name": "Conveyor Tunnel Guard System",
+      "role": "cross_module_audit",
+      "family": "manufacturing capacity plus invoicing",
+      "runtime_sources": [
+        {
+          "path": "tasks_ui/2217_medium_22_single_bom_split_by_capacity_invoicing/instruction.md",
+          "sha256": "5578a146779087e4fb3e0f9dd130e7cc0fe2b243ab3760cca124453b64d3afd3",
+          "role": "human business instruction"
+        },
+        {
+          "path": "tasks_ui/2217_medium_22_single_bom_split_by_capacity_invoicing/environment/scenario_data.json",
+          "sha256": "4328bf9e73b315131560e88dc502a23ac43c30cf57725dfcabbfe143bffb8863",
+          "role": "seeded structured scenario"
+        }
+      ],
+      "audit_sources": [
+        {
+          "path": "tasks_ui/2217_medium_22_single_bom_split_by_capacity_invoicing/tests/checks.py",
+          "sha256": "a714e3967bc3e536eb58754df7c5989ed04b489d0794c2f9b8923e1a9104f3c2"
+        },
+        {
+          "path": "tasks_ui/2217_medium_22_single_bom_split_by_capacity_invoicing/tests/test.sh",
+          "sha256": "a786936abf1ecbe31a784c1743ca7fc38791a9347234b52296d614b9fbbed330"
+        },
+        {
+          "path": "tasks_ui/2217_medium_22_single_bom_split_by_capacity_invoicing/solution/optimal_plan.json",
+          "sha256": "e91660abe95252370374233b70f79df0527544db48d3be9f15c526c3c28e854d"
+        }
+      ],
+      "templates": [
+        "sales_order_release.v1",
+        "purchase_order_release.v1",
+        "manufacturing_order_release.v1",
+        "customer_invoice_post.v1"
+      ],
+      "protected_actions": [
+        "sale.order.action_confirm",
+        "purchase.order.button_confirm",
+        "mrp.production.action_confirm",
+        "account.move.action_post"
+      ],
+      "policy_parameters": {
+        "objective_kind": "min_new_spend",
+        "product_code": "PF93640E447-SAF-CTG-010",
+        "list_price": 2746.38,
+        "customer_budget_caps": {
+          "rF93640E447_c01": 42586.15,
+          "rF93640E447_c02": 41661.21,
+          "rF93640E447_c03": 75748.70,
+          "rF93640E447_c04": 60357.79,
+          "rF93640E447_c05": 59351.81,
+          "rF93640E447_c06": 42238.95,
+          "rF93640E447_c07": 46962.30,
+          "rF93640E447_c08": 43147.95,
+          "rF93640E447_c09": 39724.62
+        },
+        "finished_stock": 67,
+        "accepted_demand": 153,
+        "minimum_new_spend_margin": 0.276,
+        "payment_term": "immediate",
+        "tax_basis": "current SO lines, product taxes and fiscal position",
+        "workcenter_capacity_is_hard": true,
+        "required_lineage": "SO -> PO or SO -> MO -> PO"
+      },
+      "candidate_fixture_visibility": "audit_only; runtime must supply a separately hashed Manager proposal",
+      "audit_candidate_proposal": {
+        "sales_order_request_refs": [
+          "rF93640E447_c01", "rF93640E447_c02", "rF93640E447_c03",
+          "rF93640E447_c04", "rF93640E447_c05", "rF93640E447_c06",
+          "rF93640E447_c07", "rF93640E447_c08", "rF93640E447_c09"
+        ],
+        "manufacturing_actions": [
+          {"plan_ref":"mo:PF93640E447-SAF-CTG-010:0:10","product_code":"PF93640E447-SAF-CTG-010","quantity":34,"workcenter_code":"PF93640E447-WC01","origin_customer_refs":["rF93640E447_c01","rF93640E447_c02","rF93640E447_c03"]},
+          {"plan_ref":"mo:PF93640E447-SAF-CTG-010:1:10","product_code":"PF93640E447-SAF-CTG-010","quantity":40,"workcenter_code":"PF93640E447-WC02","origin_customer_refs":["rF93640E447_c03","rF93640E447_c04"]},
+          {"plan_ref":"mo:PF93640E447-SAF-CTG-010:0:12","product_code":"PF93640E447-SAF-CTG-010","quantity":12,"workcenter_code":"PF93640E447-WC01","origin_customer_refs":["rF93640E447_c06"]}
+        ],
+        "purchase_actions": [
+          {"plan_ref":"po:component:rF93640E447_q08:PF93640E447-SAF-HGF-104:40:177.64:4","quantity":80,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q12:PF93640E447-SAF-PCC-108:38:11.85:4","quantity":407,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q15:PF93640E447-SAF-GRB-115:25:6.77:4","quantity":72,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q16:PF93640E447-SAF-GRB-115:8:8.62:4","quantity":73,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q18:PF93640E447-SAF-CEG-121:17:17.36:4","quantity":25,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q20:PF93640E447-SAF-CEG-121:47:19.27:4","quantity":47,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q21:PF93640E447-SAF-THC-127:5:117.79:3","quantity":5,"planned_arrival_days":3},
+          {"plan_ref":"po:component:rF93640E447_q23:PF93640E447-SAF-THC-127:27:97.93:4","quantity":46,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q24:PF93640E447-SAF-THC-127:22:96.09:4","quantity":31,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q26:PF93640E447-SAF-TCR-129:10:9.92:4","quantity":100,"planned_arrival_days":4},
+          {"plan_ref":"po:component:rF93640E447_q27:PF93640E447-SAF-TCR-129:48:7.88:4","quantity":139,"planned_arrival_days":4}
+        ],
+        "regular_invoice_order_refs": [
+          "rF93640E447_c01", "rF93640E447_c02", "rF93640E447_c03",
+          "rF93640E447_c04", "rF93640E447_c05", "rF93640E447_c06",
+          "rF93640E447_c07", "rF93640E447_c08", "rF93640E447_c09"
+        ]
+      },
+      "action_dag": {
+        "bindings": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
+        "shared_nodes": ["portfolio_plan_valid", "lineage_closure_valid", "supply_plan_released_checkpoint"],
+        "nodes": [
+          {"id":"release_sales","template":"sales_order_release.v1","targets":"audit_candidate_proposal.sales_order_request_refs"},
+          {"id":"release_purchase","template":"purchase_order_release.v1","targets":"audit_candidate_proposal.purchase_actions"},
+          {"id":"release_manufacturing","template":"manufacturing_order_release.v1","targets":"audit_candidate_proposal.manufacturing_actions"},
+          {"id":"post_invoices","template":"customer_invoice_post.v1","stage":"regular","targets":"audit_candidate_proposal.regular_invoice_order_refs"}
+        ],
+        "edges": [
+          {"from": ["portfolio_plan_valid", "lineage_closure_valid"], "to": "release_sales"},
+          {"from": ["portfolio_plan_valid", "lineage_closure_valid"], "to": "release_purchase"},
+          {"from": ["portfolio_plan_valid", "lineage_closure_valid"], "to": "release_manufacturing"},
+          {
+            "from": ["release_sales", "release_purchase", "release_manufacturing"],
+            "to": "supply_plan_released_checkpoint",
+            "required_postconditions": ["actual_workorders_match_planned_assignment"]
+          },
+          {"from": ["supply_plan_released_checkpoint"], "to": "post_invoices"}
+        ]
+      },
+      "required_runtime_snapshot": [
+        "sale, purchase and manufacturing documents with identity/state/relevant fields/write_date",
+        "per-request pretax budget, target product list_price and SO price_unit/amount_untaxed",
+        "invoice state/move_type/partner/payment term/amount/tax/SO-lineage/write_date",
+        "transitive BOM graph and product routes",
+        "workorders, workcenters, qualification notes and horizon capacities",
+        "component/finished stock, all vendor offers, dates and origins"
+      ],
+      "verifier_alignment": {
+        "action_gate": [
+          "mo_schedule_compliance",
+          "mo_component_feasibility",
+          "assembly_capacity_compliance",
+          "component_stock_capacity_compliance",
+          "po_min_qty_compliance",
+          "po_price_tier_compliance",
+          "supply_timing_feasible",
+          "new_spend_margin_policy",
+          "regular_invoice_amount_matches_policy"
+        ],
+        "post_action": [
+          "demand_coverage",
+          "deadline_fulfillment",
+          "so_confirmed",
+          "manufacturing_activity_present",
+          "retained_order_has_expected_invoice_flow"
+        ],
+        "benchmark_only": [
+          "adjacent_data_untouched",
+          "optimality_snapshot_ready"
+        ]
+      },
+      "counterfactuals": [
+        {
+          "id": "stale_manufacturing_order",
+          "mutation": "Change MO quantity or state after snapshot.",
+          "breaks_checks": ["target_is_unique_fresh_draft_mo"]
+        },
+        {
+          "id": "wrong_bom_or_forbidden_route",
+          "mutation": "Use a non-admitted BOM or forbidden finished route.",
+          "breaks_checks": ["bom_route_and_quantity_are_allowed"]
+        },
+        {
+          "id": "unqualified_or_overloaded_workcenter",
+          "mutation": "Assign an unqualified center or exceed horizon minutes.",
+          "breaks_checks": ["planned_workcenter_assignment_is_feasible"]
+        },
+        {
+          "id": "late_manufacturing",
+          "mutation": "Move MO finish after a linked SO need date.",
+          "breaks_checks": ["manufacturing_dates_are_feasible"]
+        },
+        {
+          "id": "missing_component",
+          "mutation": "Remove stock/PO coverage for one transitive BOM component.",
+          "breaks_checks": ["component_closure_is_feasible", "portfolio_plan_valid"]
+        },
+        {
+          "id": "broken_cross_module_origin",
+          "mutation": "Remove SO origin from MO or MO origin from component PO.",
+          "breaks_checks": ["lineage_closure_valid"]
+        },
+        {
+          "id": "wrong_final_invoice_flow",
+          "mutation": "Post a duplicate, wrong-term, or wrong-amount invoice.",
+          "breaks_checks": ["invoice_stage_preconditions_hold", "payment_term_matches_policy", "invoice_amount_matches_mode_and_value", "invoice_scope_is_exact", "supply_plan_released_checkpoint"]
+        }
+      ],
+      "audit_expectation": {
+        "visibility": "audit_only",
+        "confirmed_sales_orders": 9,
+        "active_purchase_orders": 11,
+        "active_manufacturing_orders": 3,
+        "posted_customer_invoices": 9
+      }
+    }
+  ]
+}

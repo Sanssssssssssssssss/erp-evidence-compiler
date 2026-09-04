@@ -1,0 +1,583 @@
+{
+  "schema_version": 7,
+  "execution_contract": {
+    "compiler_output": "checks, dependencies, parameters, source selectors and action DAG only",
+    "authorization_binding": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
+    "freshness": "Recompute all three hashes and referenced record revisions immediately before each protected action; any mismatch is STALE and blocks execution.",
+    "composition": "Merge identical checks by check id, normalized parameters and source snapshot hash into one shared DAG node.",
+    "executor": "one logical batched invocation over the dependency-closed DAG per child revision",
+    "fine_verifier": "one logical batched invocation over the same DAG per child revision",
+    "kernel": "deterministic replay",
+    "missing_evidence": "BLOCK",
+    "stale_evidence": "BLOCK",
+    "model_fallback": "only for admitted but genuinely semantic evidence"
+  },
+  "proof_recipes": {
+    "portfolio_plan_valid": {
+      "resolver": "deterministic_supply_graph",
+      "evidence": [
+        {"group_id": "proposal_graph", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["actions", "targets", "stages", "record_values", "origin_refs"]},
+        {"group_id": "planning_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["objective", "allowed_routes", "consolidation", "quantity_tiers", "margin_rule", "date_rules"]},
+        {"group_id": "planning_facts", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["demand", "stock", "offers", "boms", "workcenters", "lead_times", "relevant_internal_notes"]}
+      ]
+    },
+    "lineage_closure_valid": {
+      "resolver": "deterministic_lineage_graph",
+      "evidence": [
+        {"group_id": "proposal_lineage", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["actions", "targets", "origin_refs"]},
+        {"group_id": "business_identities", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["sales_requests", "purchase_offers", "manufacturing_inputs"]}
+      ]
+    },
+    "supply_plan_released_checkpoint": {
+      "resolver": "odoo_snapshot",
+      "evidence": [
+        {"group_id": "authorized_actions", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["actions", "targets", "record_revisions"]},
+        {"group_id": "live_release_state", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_refs", "state", "write_date", "origin_refs", "release_postconditions"]}
+      ]
+    },
+    "target_is_unique_fresh_reviewable_so": {
+      "resolver": "odoo_snapshot",
+      "evidence": [
+        {"group_id": "authorized_target", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["record_ref", "record_revision", "state", "customer_ref", "product_code", "quantity", "price_unit", "commitment_days"]},
+        {"group_id": "live_target", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_ref", "write_date", "state", "customer_ref", "order_lines", "commitment_date"]}
+      ]
+    },
+    "request_identity_matches_order": {
+      "resolver": "deterministic_field_match",
+      "evidence": [
+        {"group_id": "proposed_order", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["customer_ref", "product_code", "quantity", "task_ref"]},
+        {"group_id": "task_request", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["customer_ref", "product_code", "quantity", "task_ref"]}
+      ]
+    },
+    "acceptance_policy_is_admitted": {
+      "resolver": "registered_policy",
+      "evidence": [
+        {"group_id": "policy_text", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["active_predicate_ids", "predicate_parameters", "policy_scope"]}
+      ]
+    },
+    "acceptance_predicates_match_requested_action": {
+      "resolver": "deterministic_arithmetic",
+      "evidence": [
+        {"group_id": "proposed_order", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["action_kind", "quantity", "price_unit", "commitment_days"]},
+        {"group_id": "acceptance_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["budget_rule", "min_quantity", "max_quantity", "min_lead_days", "list_price"]},
+        {"group_id": "customer_request", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["budget", "requested_quantity", "requested_lead_days"]}
+      ]
+    },
+    "proposal_matches_policy_outcome": {
+      "resolver": "deterministic_set_comparison",
+      "evidence": [
+        {"group_id": "proposed_targets", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["confirm_targets", "cancel_targets", "create_targets"]},
+        {"group_id": "candidate_requests", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["seeded_requests", "prompt_requests"]},
+        {"group_id": "predicate_results", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["acceptance_predicates_match_requested_action"], "facts": ["per_request_acceptance"]}
+      ]
+    },
+    "confirm_payload_and_supply_are_valid": {
+      "resolver": "odoo_native_transition",
+      "evidence": [
+        {"group_id": "proposed_orders", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["targets", "commercial_fields", "commitment_dates"]},
+        {"group_id": "confirmation_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["commercial_terms", "date_rules"]},
+        {"group_id": "native_preflight", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["confirmation_errors", "state", "write_date"]},
+        {"group_id": "supply_frontier", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["portfolio_plan_valid", "lineage_closure_valid"], "facts": ["portfolio_plan_valid", "lineage_closure_valid"]}
+      ]
+    },
+    "cancel_target_is_unlocked_and_scope_exact": {
+      "resolver": "odoo_native_transition",
+      "evidence": [
+        {"group_id": "proposed_cancellations", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["targets", "record_revisions"]},
+        {"group_id": "candidate_orders", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["seeded_orders", "request_fields"]},
+        {"group_id": "cancellation_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["acceptance_rules", "cancellation_scope"]},
+        {"group_id": "native_state", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["state", "locked", "write_date"]}
+      ]
+    },
+    "target_is_unique_fresh_draft_so": {
+      "resolver": "odoo_native_transition",
+      "evidence": [
+        {"group_id": "authorized_target", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["record_ref", "record_revision", "state", "commercial_fields", "commitment_date"]},
+        {"group_id": "native_preflight", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_ref", "write_date", "state", "confirmation_errors"]}
+      ]
+    },
+    "commercial_terms_match_policy": {
+      "resolver": "deterministic_arithmetic",
+      "evidence": [
+        {"group_id": "proposed_terms", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["price_unit", "amount_untaxed", "payment_term"]},
+        {"group_id": "commercial_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["list_price_rule", "budget_rule", "payment_term_rule"]},
+        {"group_id": "request_budget", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["budget", "list_price", "payment_term"]}
+      ]
+    },
+    "commitment_is_feasible": {
+      "resolver": "deterministic_date_check",
+      "evidence": [
+        {"group_id": "proposed_commitment", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["commitment_date", "origin_refs"]},
+        {"group_id": "request_deadline", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["request_deadline"]},
+        {"group_id": "supply_frontier", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["portfolio_plan_valid"], "facts": ["on_time_supply_path"]}
+      ]
+    },
+    "target_is_unique_fresh_draft_po": {
+      "resolver": "odoo_native_transition",
+      "evidence": [
+        {"group_id": "authorized_target", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["record_ref", "record_revision", "state", "vendor_ref", "product_code", "quantity", "unit_cost", "planned_arrival_days"]},
+        {"group_id": "native_preflight", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_ref", "write_date", "state", "confirmation_errors"]}
+      ]
+    },
+    "vendor_offer_is_allowed": {
+      "resolver": "deterministic_field_match",
+      "evidence": [
+        {"group_id": "proposed_purchase", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["vendor_ref", "product_code", "route"]},
+        {"group_id": "admitted_offers", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["vendor_ref", "product_code", "route", "offer_status", "disruption_status"]},
+        {"group_id": "route_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["allowed_routes", "forbidden_routes"]}
+      ]
+    },
+    "quantity_and_price_match_tier": {
+      "resolver": "deterministic_arithmetic",
+      "evidence": [
+        {"group_id": "proposed_purchases", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["vendor_ref", "offer_ref", "quantity", "unit_cost"]},
+        {"group_id": "offer_tiers", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["minimum_quantity", "maximum_quantity", "price_tiers", "vendor_caps", "vendor_internal_notes"]},
+        {"group_id": "purchase_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["horizon_scope", "consolidation_rule", "tier_rule"]}
+      ]
+    },
+    "delivery_date_is_feasible": {
+      "resolver": "deterministic_date_check",
+      "evidence": [
+        {"group_id": "proposed_receipt", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["planned_arrival_date", "origin_refs"]},
+        {"group_id": "supply_dates", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["vendor_lead_time", "consumer_need_dates"]}
+      ]
+    },
+    "replacement_avoids_broken_path": {
+      "resolver": "deterministic_supply_graph",
+      "evidence": [
+        {"group_id": "replacement_routes", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["targets", "vendor_refs", "offer_refs", "workcenter_codes"]},
+        {"group_id": "disruption", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["broken_vendor_offer", "broken_workcenter"]}
+      ]
+    },
+    "target_is_unique_fresh_draft_mo": {
+      "resolver": "odoo_snapshot",
+      "evidence": [
+        {"group_id": "authorized_target", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["record_ref", "record_revision", "state", "product_code", "bom_ref", "quantity", "workcenter_code", "planned_dates"]},
+        {"group_id": "live_target", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_ref", "write_date", "state", "product_qty", "bom_id", "date_start", "date_finished"]}
+      ]
+    },
+    "bom_route_and_quantity_are_allowed": {
+      "resolver": "deterministic_bom_graph",
+      "evidence": [
+        {"group_id": "proposed_manufacturing", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["product_code", "bom_ref", "quantity", "route"]},
+        {"group_id": "manufacturing_catalog", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["boms", "routes", "allowed_quantities"]},
+        {"group_id": "route_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["allowed_routes", "forbidden_routes"]}
+      ]
+    },
+    "planned_workcenter_assignment_is_feasible": {
+      "resolver": "deterministic_capacity_check",
+      "evidence": [
+        {"group_id": "proposed_assignments", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["bom_ref", "operation_ref", "workcenter_code", "quantity", "planned_minutes"]},
+        {"group_id": "capacity_catalog", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["qualified_workcenters", "operation_minutes", "horizon_capacity", "workcenter_internal_notes"]},
+        {"group_id": "capacity_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["capacity_scope", "capacity_is_hard_limit"]}
+      ]
+    },
+    "manufacturing_dates_are_feasible": {
+      "resolver": "deterministic_date_check",
+      "evidence": [
+        {"group_id": "proposed_dates", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["planned_start_date", "planned_due_date", "origin_refs"]},
+        {"group_id": "manufacturing_dates", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["manufacturing_lead_time", "sales_deadlines"]}
+      ]
+    },
+    "component_closure_is_feasible": {
+      "resolver": "deterministic_bom_graph",
+      "evidence": [
+        {"group_id": "proposed_component_plan", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["manufacturing_quantities", "component_purchase_quantities", "origin_refs", "planned_dates"]},
+        {"group_id": "component_catalog", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["transitive_bom", "component_stock", "component_lead_times"]},
+        {"group_id": "supply_frontier", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["lineage_closure_valid"], "facts": ["lineage_closure_valid"]}
+      ]
+    },
+    "actual_workorders_match_planned_assignment": {
+      "resolver": "odoo_snapshot",
+      "evidence": [
+        {"group_id": "authorized_assignment", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["manufacturing_targets", "workcenter_assignments", "capacity_plan"]},
+        {"group_id": "live_workorders", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["production_ref", "production_state", "operation_ref", "workcenter_ref", "duration_expected", "write_date"]}
+      ]
+    },
+    "target_is_unique_fresh_draft_customer_invoice": {
+      "resolver": "odoo_snapshot",
+      "evidence": [
+        {"group_id": "authorized_invoice", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["record_ref", "record_revision", "state", "invoice_role", "order_ref", "customer_ref", "amount_untaxed", "payment_term", "tax_basis", "currency"]},
+        {"group_id": "live_invoice", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_ref", "write_date", "state", "move_type", "partner_id", "invoice_payment_term_id", "invoice_lines", "tax_lines", "sale_line_ids"]}
+      ]
+    },
+    "invoice_is_natively_postable": {
+      "resolver": "odoo_native_transition",
+      "evidence": [
+        {"group_id": "authorized_invoice", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["record_ref", "record_revision"]},
+        {"group_id": "native_preflight", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["access_rights", "journal", "company", "currency", "date", "partner", "accounts", "balanced_lines", "posting_errors"]}
+      ]
+    },
+    "invoice_identity_and_lineage_match_order": {
+      "resolver": "deterministic_lineage_graph",
+      "evidence": [
+        {"group_id": "proposed_invoice", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_ref", "order_ref", "customer_ref", "invoice_line_refs"]},
+        {"group_id": "sales_identity", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["retained_orders", "customers", "sales_lines"]},
+        {"group_id": "release_frontier", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["supply_plan_released_checkpoint"], "facts": ["released_sales_orders"]}
+      ]
+    },
+    "payment_term_matches_policy": {
+      "resolver": "deterministic_field_match",
+      "evidence": [
+        {"group_id": "proposed_terms", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["order_payment_term", "invoice_payment_term"]},
+        {"group_id": "payment_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["required_payment_term_semantics"]}
+      ]
+    },
+    "invoice_stage_preconditions_hold": {
+      "resolver": "deterministic_invoice_flow",
+      "evidence": [
+        {"group_id": "proposed_invoice_stages", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_roles", "order_refs", "stage_order"]},
+        {"group_id": "invoice_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["downpayment_rule", "regular_only_rule", "balance_rule"]},
+        {"group_id": "live_invoice_states", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["order_invoice_refs", "invoice_roles", "states", "write_dates", "released_orders", "posted_downpayments"]}
+      ]
+    },
+    "invoice_amount_matches_mode_and_value": {
+      "resolver": "deterministic_arithmetic",
+      "evidence": [
+        {"group_id": "proposed_amounts", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_role", "amount_untaxed", "currency"]},
+        {"group_id": "amount_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["threshold", "mode", "value", "currency_tolerance"]},
+        {"group_id": "order_amounts", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["order_untaxed_total", "authorized_downpayment_amount"]}
+      ]
+    },
+    "invoice_taxes_match_odoo_computation": {
+      "resolver": "deterministic_arithmetic",
+      "evidence": [
+        {"group_id": "proposed_tax_basis", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_lines", "tax_basis", "currency"]},
+        {"group_id": "tax_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["explicit_tax_treatment"]},
+        {"group_id": "tax_inputs", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["sale_lines", "product_taxes", "fiscal_position"]},
+        {"group_id": "odoo_tax_result", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["tax_lines", "amount_tax", "amount_total"]}
+      ]
+    },
+    "invoice_scope_is_exact": {
+      "resolver": "deterministic_set_comparison",
+      "evidence": [
+        {"group_id": "proposed_invoice_scope", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_targets", "order_refs", "invoice_roles"]},
+        {"group_id": "eligible_orders", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["retained_orders", "rejected_orders"]},
+        {"group_id": "release_frontier", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["supply_plan_released_checkpoint"], "facts": ["released_sales_orders"]}
+      ]
+    },
+    "target_is_exact_disrupted_commitment": {
+      "resolver": "deterministic_field_match",
+      "evidence": [
+        {"group_id": "proposed_cancellation", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["target_model", "record_ref", "vendor_or_workcenter", "product_code", "quantity", "origin_refs"]},
+        {"group_id": "disruption", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["broken_record_refs", "broken_vendor_offer", "broken_workcenter", "affected_origins"]}
+      ]
+    },
+    "target_is_fresh_and_natively_cancellable": {
+      "resolver": "odoo_native_transition",
+      "evidence": [
+        {"group_id": "authorized_target", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["target_model", "record_ref", "record_revision", "state"]},
+        {"group_id": "live_cancellation_state", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["write_date", "state", "locked", "active_vendor_bills", "completion_or_consumption"]}
+      ]
+    },
+    "cancellation_scope_is_exact": {
+      "resolver": "deterministic_set_comparison",
+      "evidence": [
+        {"group_id": "proposed_targets", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["cancellation_targets"]},
+        {"group_id": "disruption_scope", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["broken_record_refs", "unaffected_record_refs"]}
+      ]
+    },
+    "disrupted_commitment_is_cancelled": {
+      "resolver": "odoo_snapshot",
+      "evidence": [
+        {"group_id": "authorized_target", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["cancellation_targets", "replacement_targets", "record_revisions"]},
+        {"group_id": "live_post_state", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["cancelled_state", "write_date", "replacement_revisions"]}
+      ]
+    }
+  },
+  "shared_nodes": [
+    {
+      "id": "portfolio_plan_valid",
+      "observation": "Within the requested review scope, check the candidate proposal's applicable demand, stock, purchase, manufacturing, date, tier, margin, route, consolidation, BOM and capacity constraints. If the original objective requires covering all customer requests, compare the source request set with all proposed actions and detect omitted or duplicate requests, not only incorrect proposed targets. Do not expand an explicitly partial review to unrelated business. Candidate feasibility and observed cost do not prove global optimality. If the requested review requires optimality and the materials lack sufficient comparison or bound evidence, report that missing evidence; do not search for a replacement plan.",
+      "resolver": "deterministic_supply_graph",
+      "objective_kinds": ["constraint_only", "min_new_spend", "capacity_preservation", "vendor_consolidation", "repair_plan"]
+    },
+    {
+      "id": "lineage_closure_valid",
+      "observation": "Every proposed SO, PO and MO belongs to one proposal graph; finished POs link to SOs, finished MOs link to SOs, and component POs/MOs link to consuming MOs with quantity closure.",
+      "resolver": "deterministic_lineage_graph"
+    },
+    {
+      "id": "supply_plan_released_checkpoint",
+      "observation": "All SO/PO/MO release actions and action-specific release postconditions named by the DAG succeeded against the same bound proposal, snapshot and policy; this is a post-action checkpoint, not a planning claim.",
+      "resolver": "odoo_snapshot",
+      "established_by_action_kinds": [
+        "sale.order.action_confirm",
+        "purchase.order.button_confirm",
+        "mrp.production.action_confirm"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "id": "sales_order_disposition.v1",
+      "applies_when": "Use when the admitted policy authorizes accepting some customer requests and rejecting, cancelling or excluding others according to eligibility conditions. Apply to both confirmations and cancellations in that screening workflow, even if the proposed decision is wrong. Budget caps, quantities and deadlines alone do not establish a screening workflow: constraints on fulfilling every order belong to sales_order_release.v1. Neither a Manager stage label nor a suspected violation supplies missing authority to reject orders.",
+      "executor_status": "planned",
+      "protects": ["sale.order.action_confirm", "sale.order.action_cancel"],
+      "applicable_stages": ["confirm", "release", "cancel"],
+      "required_payload_fields": ["state", "customer_ref", "product_code", "quantity", "price_unit", "commitment_days"],
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {
+          "id": "target_is_unique_fresh_reviewable_so",
+          "applicable_stages": ["confirm", "release", "cancel"],
+          "observation": "The exact task sale.order exists once and its identity, state, write_date and relevant line fingerprint equal the admitted snapshot.",
+          "resolver": "odoo_snapshot"
+        },
+        {
+          "id": "request_identity_matches_order",
+          "applicable_stages": ["confirm", "release", "cancel"],
+          "observation": "Customer, product, quantity and task reference match the admitted task request. Price and deadline are checked separately.",
+          "resolver": "deterministic_field_match"
+        },
+        {
+          "id": "acceptance_policy_is_admitted",
+          "applicable_stages": ["confirm", "release", "cancel"],
+          "observation": "The active predicate ids and parameters come from the registered policy version, not from the action proposal.",
+          "resolver": "registered_policy"
+        },
+        {
+          "id": "acceptance_predicates_match_requested_action",
+          "applicable_stages": ["confirm", "release", "cancel"],
+          "observation": "Evaluate every predicate enabled by the registered family. Confirm requires all active predicates true; cancel/skip requires at least one active predicate false. Stable types are budget_covers_list, quantity_range and minimum_lead_days; absent predicates are not invented.",
+          "resolver": "deterministic_arithmetic"
+        },
+        {
+          "id": "proposal_matches_policy_outcome",
+          "applicable_stages": ["confirm", "release", "cancel"],
+          "observation": "For this action's target requests, the proposed action matches their reviewed eligibility: confirm passing requests, cancel failing seeded drafts, and do not create failing prompt-only requests. Whole-task coverage belongs to the shared portfolio check, not this local check.",
+          "resolver": "deterministic_set_comparison"
+        },
+        {
+          "id": "confirm_payload_and_supply_are_valid",
+          "applicable_stages": ["confirm", "release"],
+          "observation": "The draft quotation passes Odoo's native confirmation check; commercial fields and commitment date match policy; and the confirmed subset is supported by shared portfolio_plan_valid and lineage_closure_valid.",
+          "resolver": "odoo_native_transition"
+        },
+        {
+          "id": "cancel_target_is_unlocked_and_scope_exact",
+          "applicable_stages": ["cancel"],
+          "observation": "The target is not locked and cancellation includes only failing seeded task orders; supply feasibility is not a cancellation prerequisite.",
+          "resolver": "odoo_native_transition"
+        }
+      ],
+      "requires_shared": {"confirm": ["portfolio_plan_valid", "lineage_closure_valid"], "release": ["portfolio_plan_valid", "lineage_closure_valid"], "cancel": []}
+    },
+    {
+      "id": "sales_order_release.v1",
+      "applies_when": "Use when the admitted policy requires fulfilling the customer orders rather than selecting which requests to accept. Budget, price, quantity, margin and delivery constraints remain review obligations under this template; violating them does not turn firm demand into an accept/reject workflow. A requirement to cover every order is not waived by words such as retained orders. If the policy instead authorizes rejecting or excluding requests on eligibility grounds, use sales_order_disposition.v1. Select from policy, not the Manager stage label or whether the proposed confirmation will pass review.",
+      "executor_status": "planned",
+      "protects": ["sale.order.action_confirm"],
+      "applicable_stages": ["confirm", "release"],
+      "required_payload_fields": ["state", "customer_ref", "product_code", "quantity", "price_unit", "commitment_days"],
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {
+          "id": "target_is_unique_fresh_draft_so",
+          "observation": "The quotation exists once, remains draft/sent, passes Odoo's native confirmation error check, and its relevant fields match the admitted snapshot.",
+          "resolver": "odoo_native_transition"
+        },
+        {
+          "id": "request_identity_matches_order",
+          "observation": "Customer, product, quantity and task reference match the admitted task request. Price and deadline are checked separately.",
+          "resolver": "deterministic_field_match"
+        },
+        {
+          "id": "commercial_terms_match_policy",
+          "observation": "Unit price is list price, untaxed total is within budget, and any required sales payment term matches registered semantics.",
+          "resolver": "deterministic_arithmetic"
+        },
+        {
+          "id": "commitment_is_feasible",
+          "observation": "The commitment date is within the request deadline and shared portfolio_plan_valid provides an on-time supply path.",
+          "resolver": "deterministic_date_check"
+        }
+      ],
+      "requires_shared": ["portfolio_plan_valid", "lineage_closure_valid"]
+    },
+    {
+      "id": "purchase_order_release.v1",
+      "executor_status": "planned",
+      "protects": ["purchase.order.button_confirm"],
+      "applicable_stages": ["release", "replacement_release"],
+      "required_payload_fields": ["state", "vendor_ref", "product_code", "quantity", "unit_cost", "planned_arrival_days", "origin_refs"],
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {
+          "id": "target_is_unique_fresh_draft_po",
+          "observation": "The RFQ exists once, remains draft/sent, passes Odoo's native confirmation check, and its relevant fields match the admitted snapshot.",
+          "resolver": "odoo_native_transition"
+        },
+        {
+          "id": "vendor_offer_is_allowed",
+          "observation": "Vendor, product and route resolve to an admitted offer and are not forbidden or disrupted.",
+          "resolver": "deterministic_field_match"
+        },
+        {
+          "id": "quantity_and_price_match_tier",
+          "observation": "Horizon-wide quantity respects min/max/vendor-note caps and unit price equals the applicable offer tier.",
+          "resolver": "deterministic_arithmetic"
+        },
+        {
+          "id": "delivery_date_is_feasible",
+          "observation": "Planned receipt is no earlier than vendor lead time and no later than every linked consumer need date.",
+          "resolver": "deterministic_date_check"
+        },
+        {
+          "id": "replacement_avoids_broken_path",
+          "applicable_stages": ["replacement_release"],
+          "observation": "No replacement PO/MO resolves to the broken supplier offer or workcenter.",
+          "resolver": "deterministic_supply_graph"
+        }
+      ],
+      "requires_shared": ["portfolio_plan_valid", "lineage_closure_valid"],
+      "stage_prerequisites": {
+        "replacement_release": [
+          {
+            "template_id": "cancel_and_repair_supply.v1",
+            "stage": "cancel",
+            "required_postconditions": ["disrupted_commitment_is_cancelled"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manufacturing_order_release.v1",
+      "executor_status": "planned",
+      "protects": ["mrp.production.action_confirm"],
+      "applicable_stages": ["release"],
+      "required_payload_fields": ["state", "product_code", "bom_ref", "quantity", "workcenter_code", "planned_start_days", "planned_due_days", "origin_refs"],
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {
+          "id": "target_is_unique_fresh_draft_mo",
+          "observation": "The manufacturing order exists once, remains draft, and its relevant fields match the admitted snapshot.",
+          "resolver": "odoo_snapshot"
+        },
+        {
+          "id": "bom_route_and_quantity_are_allowed",
+          "observation": "Product, BOM, quantity and manufacture route are admitted and do not use a forbidden finished-goods route.",
+          "resolver": "deterministic_bom_graph"
+        },
+        {
+          "id": "planned_workcenter_assignment_is_feasible",
+          "observation": "The proposal's BOM operation/workcenter assignment is qualified and its horizon minutes fit admitted capacity; workorders need not exist before MO confirmation.",
+          "resolver": "deterministic_capacity_check"
+        },
+        {
+          "id": "manufacturing_dates_are_feasible",
+          "observation": "Proposed start, lead-time and due dates fit every linked sales-order deadline.",
+          "resolver": "deterministic_date_check"
+        },
+        {
+          "id": "component_closure_is_feasible",
+          "observation": "On-hand and linked component POs/MOs cover the transitive BOM quantities before production starts.",
+          "resolver": "deterministic_bom_graph"
+        }
+      ],
+      "requires_shared": ["portfolio_plan_valid", "lineage_closure_valid"],
+      "post_action_checks": [
+        {
+          "id": "actual_workorders_match_planned_assignment",
+          "observation": "After confirmation, generated workorders match the authorized workcenter assignment and capacity plan.",
+          "resolver": "odoo_snapshot"
+        }
+      ],
+      "postconditions_for_shared": {
+        "supply_plan_released_checkpoint": ["actual_workorders_match_planned_assignment"]
+      }
+    },
+    {
+      "id": "customer_invoice_post.v1",
+      "executor_status": "planned",
+      "protects": ["account.move.action_post"],
+      "applicable_stages": ["downpayment", "regular", "balance"],
+      "required_payload_fields": ["state", "invoice_role", "order_ref", "customer_ref", "amount_untaxed", "payment_term", "tax_basis", "currency"],
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {
+          "id": "target_is_unique_fresh_draft_customer_invoice",
+          "observation": "The exact account.move exists once, is a draft out_invoice, and state, move_type, partner, terms, amounts, taxes, lines, SO lineage and write_date match the admitted snapshot.",
+          "resolver": "odoo_snapshot"
+        },
+        {
+          "id": "invoice_is_natively_postable",
+          "observation": "Posting rights and Odoo-native required journal, company, currency, date, partner, active accounts and balanced non-empty lines are valid; no known posting blocker is present.",
+          "resolver": "odoo_native_transition"
+        },
+        {
+          "id": "invoice_identity_and_lineage_match_order",
+          "observation": "Invoice partner and lines link exactly to the intended retained confirmed sale order under the same proposal.",
+          "resolver": "deterministic_lineage_graph"
+        },
+        {
+          "id": "payment_term_matches_policy",
+          "observation": "Sale order and invoice use the registered payment-term semantics, not only a coincidentally similar label.",
+          "resolver": "deterministic_field_match"
+        },
+        {
+          "id": "invoice_stage_preconditions_hold",
+          "observation": "Regular-only posts once. A down payment posts before the balance. A regular balance requires the authorized down-payment checkpoint and no unexpected invoice role. Future stages need not already exist.",
+          "resolver": "deterministic_invoice_flow"
+        },
+        {
+          "id": "invoice_amount_matches_mode_and_value",
+          "observation": "Inputs are threshold, mode=fixed_amount|percentage, value and currency tolerance. regular_only expects the full SO untaxed total; downpayment computes the configured fixed or percentage amount independently; balance expects SO untaxed total minus the authorized down payment. Each invoice must match its own stage.",
+          "resolver": "deterministic_arithmetic"
+        },
+        {
+          "id": "invoice_taxes_match_odoo_computation",
+          "observation": "Draft invoice taxes and totals match admitted SO lines, product taxes and fiscal position. Tax-free is required only by explicit public policy, never inferred from a pre-tax budget or hidden verifier.",
+          "resolver": "deterministic_arithmetic"
+        },
+        {
+          "id": "invoice_scope_is_exact",
+          "observation": "Only retained orders are invoice targets, and the proposal schedules exactly the registered invoice stages for each retained order.",
+          "resolver": "deterministic_set_comparison"
+        }
+      ],
+      "requires_shared": ["supply_plan_released_checkpoint"],
+      "stage_prerequisites": {
+        "balance": [
+          {"template_id": "customer_invoice_post.v1", "stage": "downpayment"}
+        ]
+      }
+    },
+    {
+      "id": "cancel_and_repair_supply.v1",
+      "executor_status": "active",
+      "protects": ["purchase.order.button_cancel", "mrp.production.action_cancel"],
+      "applicable_stages": ["cancel"],
+      "required_payload_fields": {
+        "purchase.order.button_cancel": ["state", "vendor_ref", "product_code", "quantity", "unit_cost", "planned_arrival_days", "origin_refs"],
+        "mrp.production.action_cancel": ["state", "product_code", "bom_ref", "quantity", "workcenter_code", "planned_start_days", "planned_due_days", "origin_refs"]
+      },
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {
+          "id": "target_is_exact_disrupted_commitment",
+          "observation": "The cancellation target is the admitted broken PO/MO and the disruption evidence identifies the same vendor offer or workcenter.",
+          "resolver": "deterministic_field_match"
+        },
+        {
+          "id": "target_is_fresh_and_natively_cancellable",
+          "observation": "Branch by target_model. PO: unchanged, unlocked, and no non-draft/non-cancelled vendor bill. MO: unchanged and not done. Any stricter completed-receipt/consumption rule is registered business safety policy, not Odoo-native behavior.",
+          "resolver": "odoo_native_transition"
+        },
+        {
+          "id": "cancellation_scope_is_exact",
+          "observation": "Only commitments affected by the admitted disruption are cancelled; unaffected task commitments are not cancellation targets.",
+          "resolver": "deterministic_set_comparison"
+        }
+      ],
+      "requires_shared": [],
+      "post_action_checks": [
+        {
+          "id": "disrupted_commitment_is_cancelled",
+          "observation": "After cancellation, the exact broken PO/MO is cancelled and the bound replacement proposal remains current.",
+          "resolver": "odoo_snapshot"
+        }
+      ]
+    }
+  ]
+}

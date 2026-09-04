@@ -1,0 +1,129 @@
+{
+  "pack_id": "odoo.vendor_bill_posting.v1",
+  "version": "1",
+  "requirement_pack_version": "odoo.vendor_bill_posting.v1",
+  "policy_version": "runtime-admitted",
+  "requires_action_proposal": true,
+  "policy_basis": {
+    "source": "Registered vendor-bill three-way match policy"
+  },
+  "required_match_flag": "1",
+  "requirements": {
+    "vendor_bill_posting_plan_valid": {
+      "label": "The proposed vendor-bill action matches the admitted PO, receipt, bill, document, and policy facts",
+      "kind": "cross_check",
+      "owner": "reviewer",
+      "default_required": true,
+      "premise_requirements": [],
+      "required_policy_values": ["required_match_flag"]
+    }
+  },
+  "profiles": {
+    "vendor_bill_posting": [
+      {"id": "vendor_bill_posting_plan_valid", "required": true}
+    ]
+  },
+  "planning_hints": {
+    "vendor_bill_posting_plan_valid": {
+      "target_predicate": "derived.vendor_bill_posting_facts.proposed_action_matches_policy",
+      "capability": "odoo.vendor_bill_posting.v1",
+      "activation": "explicit"
+    }
+  },
+  "capabilities": {
+    "odoo.vendor_bill_posting.v1": {
+      "action_kinds": ["post_vendor_bill", "hold_vendor_bill"],
+      "record_model": "derived.vendor_bill_posting_facts",
+      "record_fields": [
+        "ordered_quantity",
+        "received_quantity",
+        "purchase_untaxed_total",
+        "bill_untaxed_total",
+        "document_untaxed_total",
+        "vendor_identity_match",
+        "document_reference_match",
+        "fact_provenance"
+      ],
+      "predicate_program": {
+        "steps": [
+          {
+            "step_id": "ordered_quantity_equals_received_quantity",
+            "operation": "EQUAL",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/ordered_quantity"},
+              {"kind": "RECORD_FIELD", "ref_id": "/received_quantity"}
+            ]
+          },
+          {
+            "step_id": "purchase_total_equals_bill_total",
+            "operation": "EQUAL",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/purchase_untaxed_total"},
+              {"kind": "RECORD_FIELD", "ref_id": "/bill_untaxed_total"}
+            ]
+          },
+          {
+            "step_id": "document_total_equals_bill_total",
+            "operation": "EQUAL",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/document_untaxed_total"},
+              {"kind": "RECORD_FIELD", "ref_id": "/bill_untaxed_total"}
+            ]
+          },
+          {
+            "step_id": "vendor_identity_matches",
+            "operation": "EQUAL",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/vendor_identity_match"},
+              {"kind": "POLICY", "ref_id": "required_match_flag"}
+            ]
+          },
+          {
+            "step_id": "document_reference_matches",
+            "operation": "EQUAL",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/document_reference_match"},
+              {"kind": "POLICY", "ref_id": "required_match_flag"}
+            ]
+          }
+        ],
+        "outcome": {
+          "operator": "ALL",
+          "predicate_refs": [
+            "ordered_quantity_equals_received_quantity",
+            "purchase_total_equals_bill_total",
+            "document_total_equals_bill_total",
+            "vendor_identity_matches",
+            "document_reference_matches"
+          ],
+          "true_action": "post_vendor_bill",
+          "false_action": "hold_vendor_bill"
+        }
+      },
+      "terminal_relations": {
+        "PROPOSED_ACTION_MATCHES_POLICY_OUTCOME": "SUPPORTED",
+        "PROPOSED_ACTION_CONTRADICTS_POLICY_OUTCOME": "CONTRADICTED"
+      },
+      "requirement_id": "vendor_bill_posting_plan_valid",
+      "facet_ref": "three_way_match"
+    }
+  },
+  "proof_signatures": [
+    {
+      "signature_id": "odoo_vendor_bill_posting_decision",
+      "version": "1",
+      "requirement_id": "vendor_bill_posting_plan_valid",
+      "root_composition": "ALL_REQUIRED",
+      "required_policy_refs": ["required_match_flag"],
+      "facets": [
+        {
+          "id": "three_way_match",
+          "proof_paths": [
+            {"minimum_proof_terms": ["CLAIM", "WITNESS", "BINDING"]}
+          ],
+          "semantic_contract": "Executor must ground every admitted PO, receipt, bill, and document-derived fact, execute and submit every registered equality Witness, and bind the proposed action to the complete three-way-match outcome. Verifier independently assesses the submission; Kernel remains the final integrity authority."
+        }
+      ]
+    }
+  ]
+}

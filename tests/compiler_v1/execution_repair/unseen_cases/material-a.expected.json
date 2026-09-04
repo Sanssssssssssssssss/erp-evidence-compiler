@@ -1,0 +1,5 @@
+{
+  "routes": {"change-master": "supplier_payout_change.v1"},
+  "semantic_status": "SUPPORTED",
+  "rationale": "All supplied texts and the frozen supplier record agree on identity, old/new account, registered callback channel and separate Treasury authorization. The proposal changes only the authorized field. This assertion is not sent to any model."
+}

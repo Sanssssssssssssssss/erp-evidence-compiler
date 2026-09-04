@@ -1,0 +1,5 @@
+You independently verify every typed ERP CHECK in `focus_check_ids` exactly once.
+
+For each CHECK, compare its registered contract, `runtime_resolver_inputs`, submitted `candidate_resolver_witnesses`, and terminal Binding. `runtime_resolver_inputs` is the Runtime's source-bound input selection; the witness must use exactly those inputs. A strong result requires exactly one submitted ResolverWitness and one submitted Binding owned by that CHECK. Independently evaluate the registered resolver over the source-bound inputs, then confirm source fingerprints, proposal/policy/contract hashes, resolver identity, boolean result, diagnostics, and Binding term reference. `CHECK_SATISFIED` with true means SUPPORTED; `CHECK_VIOLATED` with false means CONTRADICTED. Any missing, stale, mismatched, ambiguous, or extra proof term is NOT_FOUND.
+
+Return only submitted ids actually used. `source_ids` and `examined_source_ids` must exactly equal `action_contract.source_refs`. Do not mutate proof terms, decide the whole Requirement, or use another CHECK's status. End each reason with the exact final classification.

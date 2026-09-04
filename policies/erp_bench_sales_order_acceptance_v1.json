@@ -1,0 +1,120 @@
+{
+  "pack_id": "erp_bench.sales_order_acceptance.v1",
+  "version": "1",
+  "requirement_pack_version": "erp_bench.sales_order_acceptance.v1",
+  "policy_version": "runtime-admitted",
+  "requires_action_proposal": true,
+  "policy_basis": {
+    "source": "Registered ERP-Bench sales-order acceptance policy; values are admitted from a versioned policy source"
+  },
+  "unconfigured_policy_values": [
+    "minimum_quantity",
+    "maximum_quantity",
+    "minimum_lead_days"
+  ],
+  "requirements": {
+    "order_acceptance_plan_valid": {
+      "label": "Every proposed sales-order action matches the admitted acceptance facts and policy",
+      "kind": "cross_check",
+      "owner": "reviewer",
+      "default_required": true,
+      "premise_requirements": [],
+      "required_policy_values": [
+        "minimum_quantity",
+        "maximum_quantity"
+      ]
+    }
+  },
+  "profiles": {
+    "sales_order_acceptance": [
+      {"id": "order_acceptance_plan_valid", "required": true}
+    ]
+  },
+  "planning_hints": {
+    "order_acceptance_plan_valid": {
+      "target_predicate": "derived.order_acceptance_facts.proposed_action_matches_policy",
+      "capability": "erp_bench.sales_order_acceptance.v1",
+      "activation": "explicit"
+    }
+  },
+  "capabilities": {
+    "erp_bench.sales_order_acceptance.v1": {
+      "action_kinds": ["confirm_sales_order", "cancel_sales_order"],
+      "record_model": "derived.order_acceptance_facts",
+      "record_fields": ["requested_quantity", "unit_list_price", "pretax_budget", "lead_days", "fact_provenance"],
+      "optional_policy_values": ["minimum_lead_days"],
+      "predicate_program": {
+        "steps": [
+          {
+            "step_id": "quantity_gte_minimum",
+            "operation": "GTE",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/requested_quantity"},
+              {"kind": "POLICY", "ref_id": "minimum_quantity"}
+            ]
+          },
+          {
+            "step_id": "quantity_lte_maximum",
+            "operation": "LTE",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/requested_quantity"},
+              {"kind": "POLICY", "ref_id": "maximum_quantity"}
+            ]
+          },
+          {
+            "step_id": "quantity_times_list_price",
+            "operation": "MULTIPLY",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/requested_quantity"},
+              {"kind": "RECORD_FIELD", "ref_id": "/unit_list_price"}
+            ]
+          },
+          {
+            "step_id": "budget_gte_quantity_times_list_price",
+            "operation": "GTE",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/pretax_budget"},
+              {"kind": "STEP", "ref_id": "quantity_times_list_price"}
+            ]
+          },
+          {
+            "step_id": "lead_days_gte_minimum",
+            "operation": "GTE",
+            "operands": [
+              {"kind": "RECORD_FIELD", "ref_id": "/lead_days"},
+              {"kind": "POLICY", "ref_id": "minimum_lead_days"}
+            ]
+          }
+        ],
+        "outcome": {
+          "operator": "ALL",
+          "predicate_refs": ["quantity_gte_minimum", "quantity_lte_maximum", "budget_gte_quantity_times_list_price", "lead_days_gte_minimum"],
+          "true_action": "confirm_sales_order",
+          "false_action": "cancel_sales_order"
+        }
+      },
+      "terminal_relations": {
+        "PROPOSED_ACTION_MATCHES_POLICY_OUTCOME": "SUPPORTED",
+        "PROPOSED_ACTION_CONTRADICTS_POLICY_OUTCOME": "CONTRADICTED"
+      },
+      "requirement_id": "order_acceptance_plan_valid",
+      "facet_ref": "order_decision"
+    }
+  },
+  "proof_signatures": [
+    {
+      "signature_id": "erp_bench_sales_order_acceptance_decision",
+      "version": "1",
+      "requirement_id": "order_acceptance_plan_valid",
+      "root_composition": "ALL_REQUIRED",
+      "required_policy_refs": ["minimum_quantity", "maximum_quantity"],
+      "facets": [
+        {
+          "id": "order_decision",
+          "proof_paths": [{"minimum_proof_terms": ["CLAIM", "WITNESS", "BINDING"]}],
+          "semantic_contract": "Executor must ground every admitted acceptance fact, invoke and submit every registered predicate Witness, and bind the proposed action to the complete predicate outcome. Verifier must independently assess the submitted Claims, Witnesses, and terminal Binding. Kernel remains the final deterministic integrity authority."
+        }
+      ]
+    }
+  ]
+}

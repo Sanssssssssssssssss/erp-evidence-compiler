@@ -1,0 +1,44 @@
+{
+  "catalog_file": "catalog-round2.json",
+  "manager_request": {
+    "scenario_id": "material-c-new", "proposal_id": "proposal:review-c:r1",
+    "task_objective": "请审核这次员工差旅实际费用报销能否过账。请把申报记录、两张票据、差旅规则和经理签批对照，核实报销金额与审批范围；这里只审核，不执行付款或过账。",
+    "source_refs": ["policy:travel", "claim:cedar-42", "document:hotel", "document:rail", "document:travel-approval"],
+    "actions": [{
+      "action_id": "post-expense", "action_kind": "expense.claim.post_reimbursement", "stage": "approve",
+      "target_record_refs": ["claim:cedar-42"],
+      "action_payload": {"payload_version": 1, "snapshot_revision": "review:r1", "records": [{
+        "record_ref": "claim:cedar-42", "record_revision": "claim:r6",
+        "values": {"employee_ref": "employee:nora-18", "trip_ref": "trip:cedar-7", "currency": "USD", "amount": "180.00", "expense_basis": "actual_receipts"}
+      }]}
+    }]
+  },
+  "sources": [
+    {
+      "source_id": "policy:travel", "title": "Internal travel reimbursement policy", "kind": "document",
+      "content": "Internal travel policy version 4. For actual-receipt business trips, reimburse only employee-paid lodging and standard rail fares linked to the employee and trip. Use the sum of the eligible receipt amounts, in USD, with a total trip limit of USD 200.00. Personal purchases, daily allowances and company-paid charges cannot be added to this actual-cost claim. The ERP claim must still be UNPAID. The employee's registered manager must sign approval for the same claim, trip and total; employees cannot approve their own claims. This policy does not establish per-diem entitlement.",
+      "provenance": {"role": "instruction", "fixture": true}
+    },
+    {
+      "source_id": "claim:cedar-42", "title": "Expense claim export", "kind": "record", "content": "",
+      "record_model": "hr.expense.sheet", "record_revision": "claim:r6",
+      "structured_fields": {"employee_ref": "employee:nora-18", "employee_name": "Nora Vale", "trip_ref": "trip:cedar-7", "expense_basis": "actual_receipts", "currency": "USD", "amount": "180.00", "reimbursement_status": "UNPAID", "registered_manager": "Omar Finch", "receipt_refs": ["HOTEL-CED-71", "RAIL-CED-72"]},
+      "provenance": {"role": "evidence", "fixture": true, "origin": "synthetic ERP export; not live Odoo"}
+    },
+    {
+      "source_id": "document:hotel", "title": "Lodging receipt", "kind": "document",
+      "content": "Receipt HOTEL-CED-71. Guest Nora Vale, employee:nora-18; business trip trip:cedar-7. Lodging charge: USD 150.00, all taxes included. Paid in full by the employee's personal card. There are no personal purchases or company-paid items on this receipt. Claimed under claim:cedar-42.",
+      "provenance": {"role": "evidence", "fixture": true}
+    },
+    {
+      "source_id": "document:rail", "title": "Rail ticket receipt", "kind": "document",
+      "content": "Receipt RAIL-CED-72. Passenger Nora Vale, employee:nora-18; business trip trip:cedar-7. Standard rail fare: USD 30.00, all taxes included. Paid in full by the employee personally, not by the company. Claimed under claim:cedar-42.",
+      "provenance": {"role": "evidence", "fixture": true}
+    },
+    {
+      "source_id": "document:travel-approval", "title": "Manager travel-cost approval", "kind": "document",
+      "content": "Approval AP-CED-9. I approve reimbursement of the actual lodging and standard rail costs evidenced by HOTEL-CED-71 and RAIL-CED-72 for Nora Vale (employee:nora-18), trip:cedar-7, claim:cedar-42, total USD 180.00. No allowance, personal item or other trip is included. Signed: Omar Finch, Nora Vale's manager.",
+      "provenance": {"role": "evidence", "fixture": true}
+    }
+  ]
+}

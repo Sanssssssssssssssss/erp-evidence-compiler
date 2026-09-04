@@ -1,0 +1,333 @@
+{
+  "pack_id": "aurora_ap_v1",
+  "version": "1",
+  "policy_version": "aurora_ap_lite_v1",
+  "requirement_pack_version": "aurora_requirement_pack_v1",
+  "tenant": "Aurora Office Supplies demo",
+  "policy_basis": {
+    "status": "demo_tenant_assumption",
+    "note": "The local session database contains user interactions, not an authoritative enterprise policy table. Replace tenant values from an approved policy source before production use."
+  },
+  "amount_tolerance_percent": "2",
+  "invoice_calculation_rounding_tolerance": {
+    "amount": "0.01",
+    "unit": "document_currency",
+    "scope": "invoice_internal_arithmetic_rounding",
+    "note": "Absolute rounding allowance for one invoice's internal arithmetic; this is not the three-way matching percentage tolerance."
+  },
+  "allowed_amount_basis_by_subject": {
+    "invoice": ["invoice_total"],
+    "purchase_order": ["order_total"],
+    "goods_receipt": ["received_value", "cumulative_received_value"]
+  },
+  "comparable_tax_bases": ["gross", "net"],
+  "comparable_coverages": ["full"],
+  "unconfigured_policy_values": [
+    "quantity_matching_tolerance",
+    "contract_matching_tolerance",
+    "duplicate_search_window",
+    "approval_authority_limits",
+    "bank_change_cooling_period",
+    "payment_release_thresholds",
+    "invoice_template_baseline_ref",
+    "jurisdiction_tax_rules",
+    "record_retention_period"
+  ],
+  "dynamic_support_requirements": [
+    "invoice_number", "supplier", "buyer", "invoice_date", "amount_total", "currency_tax", "currency", "tax_treatment", "source_traceability",
+    "line_items_product_title", "signature_or_authorized_signatory", "template_match",
+    "po_number", "po_ref", "po_amount", "po_date", "grn_number", "received_quantity", "inspection_status",
+    "vendor_status", "vendor_id", "bank_last_four", "duplicate_invoice_found", "prior_payment_found", "clearing_document", "payment_reference",
+    "vendor_bank_change_record", "approval_matrix", "invoice_approval_record", "sod_control_record",
+    "payment_release_record", "contract_or_sow", "service_acceptance",
+    "tax_and_account_coding_record", "exception_hold_record", "audit_trail_record"
+  ],
+  "planning_hints": {
+    "source_traceability": {
+      "target_predicate": "source.upload_provenance_traceable",
+      "capability": "system_provenance",
+      "activation": "explicit"
+    },
+    "three_way_amount_match": {
+      "target_predicate": "payable.three_way_amount_match",
+      "capability": "amount_reconciliation",
+      "activation": "derived",
+      "activation_requirement_groups": [["invoice"], ["purchase_order"], ["goods_receipt", "goods_receipt_or_service_acceptance"]]
+    },
+    "no_active_duplicate": {
+      "target_predicate": "payable.no_active_duplicate",
+      "capability": "payment_lifecycle",
+      "activation": "derived",
+      "activation_requirement_groups": [["invoice"], ["duplicate_payment_check", "duplicate_payment_screen"]]
+    },
+    "invoice_fields_valid": {
+      "target_predicate": "invoice.fields_valid",
+      "capability": "document_semantics",
+      "activation": "explicit"
+    },
+    "invoice_calculation_valid": {
+      "target_predicate": "invoice.calculation_valid",
+      "capability": "invoice_arithmetic",
+      "activation": "explicit"
+    },
+    "three_way_quantity_match": {
+      "target_predicate": "payable.three_way_quantity_match",
+      "capability": "quantity_reconciliation",
+      "activation": "explicit"
+    },
+    "vendor_identity_active": {
+      "target_predicate": "vendor.identity_active",
+      "capability": "master_data_status",
+      "activation": "explicit"
+    },
+    "vendor_bank_account_authorized": {
+      "target_predicate": "vendor.bank_account_authorized",
+      "capability": "bank_change_authorization",
+      "activation": "explicit"
+    },
+    "approval_authority_satisfied": {
+      "target_predicate": "approval.authority_satisfied",
+      "capability": "approval_authority",
+      "activation": "explicit"
+    },
+    "sod_control_satisfied": {
+      "target_predicate": "approval.sod_satisfied",
+      "capability": "segregation_of_duties",
+      "activation": "explicit"
+    },
+    "payment_release_authorized": {
+      "target_predicate": "payment.release_authorized",
+      "capability": "payment_release",
+      "activation": "explicit"
+    },
+    "non_po_contract_match": {
+      "target_predicate": "payable.non_po_contract_match",
+      "capability": "contract_reconciliation",
+      "activation": "explicit"
+    },
+    "tax_and_account_coding_valid": {
+      "target_predicate": "invoice.tax_and_account_coding_valid",
+      "capability": "tax_account_coding",
+      "activation": "explicit"
+    },
+    "no_unresolved_payment_hold": {
+      "target_predicate": "payment.no_unresolved_hold",
+      "capability": "payment_lifecycle",
+      "activation": "explicit"
+    },
+    "audit_chain_complete": {
+      "target_predicate": "evidence.audit_chain_complete",
+      "capability": "audit_traceability",
+      "activation": "explicit"
+    }
+  },
+  "proof_signatures": [
+    {
+      "signature_id": "invoice_arithmetic",
+      "version": "3",
+      "requirement_id": "invoice_calculation_valid",
+      "root_composition": "ALL_REQUIRED",
+      "required_policy_refs": ["invoice_calculation_rounding_tolerance"],
+      "facets": [
+        {
+          "id": "line_extensions",
+          "proof_paths": [{"minimum_proof_terms": ["WITNESS"]}],
+          "semantic_contract": "Enumerate every source-listed item, service, or detail amount that contributes to the subtotal. For every entry that explicitly states quantity, unit price, and extension, ground all three and replay the multiplication before accepting its extension. A lump-sum entry remains a line extension even when quantity or unit price is absent: ground its stated extension without inventing a multiplication. For this facet, complete coverage means one grounded extension Claim per source-listed entry; arithmetic inclusion exactly once in a SUM belongs to the subtotal_aggregation facet. No entry may be omitted or reclassified as an applied component merely from its label. If an entry's arithmetic role is ambiguous or an explicit calculation is not replayed, preserve the outcome as NOT_FOUND."
+        },
+        {
+          "id": "subtotal_aggregation",
+          "proof_paths": [{"minimum_proof_terms": ["WITNESS"]}],
+          "semantic_contract": "Recompute the subtotal from every source-listed line extension established for the document, including grounded lump-sum entries, and compare that derived subtotal with the stated subtotal. An omitted or ambiguously classified subtotal input is a coverage gap, not evidence that the stated subtotal is contradicted."
+        },
+        {
+          "id": "stated_components",
+          "proof_paths": [
+            {
+              "minimum_proof_terms": ["BINDING", "WITNESS"],
+              "semantic_roles": [
+                "COMPONENT_OBSERVATION",
+                "COMPONENT_APPLICABILITY",
+                "COMPONENT_RECONCILIATION"
+              ]
+            },
+            {
+              "minimum_proof_terms": ["CLAIM"],
+              "semantic_roles": ["COMPONENT_TREATMENT"]
+            }
+          ],
+          "semantic_contract": "Verify every source-stated tax, discount, charge, adjustment, or non-calculated treatment outside the item, service, or detail listing. The calculated-component path grounds the component amount and sign/role, establishes any claimed rate-to-base relationship without numerical guesswork, recomputes the amount, and applies tolerance. The treatment-only path accepts a grounded explicit treatment or exclusion statement only when exhaustive inspection finds no stated calculated tax, discount, charge, or adjustment amount or rate outside that listing; ordinary line-item quantities, prices, and extensions never count as components for this test. This absence is a source-coverage finding and does not require the document to contain a separate no-other-components sentence. The treatment path must never bypass a numeric component. Do not classify one source amount as both a line extension and a component. If a calculated component's applicable base or arithmetic role cannot be established, preserve the outcome as NOT_FOUND."
+        },
+        {
+          "id": "final_total",
+          "proof_paths": [{"minimum_proof_terms": ["WITNESS"]}],
+          "semantic_contract": "Reconcile the stated final total from independently established upstream amounts while preserving every source-stated sign. When the source explicitly says an upstream amount includes or excludes a component, ground that treatment separately and consume it in the final-total proof so the component is not silently added or removed twice. When the source states a transaction-document type or subtype that determines sign semantics, ground that document type and include it in the final-total proof; never infer polarity from convention alone."
+        }
+      ]
+    },
+    {
+      "signature_id": "invoice_template_comparison",
+      "version": "1",
+      "requirement_id": "template_match",
+      "root_composition": "ALL_REQUIRED",
+      "required_policy_refs": ["invoice_template_baseline_ref"],
+      "facets": [
+        {"id": "baseline_comparison", "proof_paths": [{"minimum_proof_terms": ["BINDING"]}]}
+      ]
+    }
+  ],
+  "requirements": {
+    "invoice": {"label": "发票文档", "kind": "document", "owner": "evidence", "evidence_type": "invoice", "default_required": true},
+    "purchase_order": {"label": "采购订单", "kind": "document", "owner": "evidence", "evidence_type": "purchase_order", "default_required": true},
+    "goods_receipt": {"label": "收货/验收记录", "kind": "document", "owner": "evidence", "evidence_type": "goods_receipt", "default_required": true},
+    "vendor_record": {"label": "供应商主数据", "kind": "document", "owner": "evidence", "evidence_type": "vendor_record", "default_required": true},
+    "duplicate_payment_check": {"label": "重复付款检查", "kind": "risk_check", "owner": "evidence", "evidence_type": "duplicate_payment_check", "default_required": true},
+    "goods_receipt_or_service_acceptance": {"label": "收货/服务验收记录", "kind": "document", "owner": "evidence", "evidence_type": "goods_receipt", "default_required": true},
+    "vendor_identity": {"label": "供应商身份/主数据", "kind": "document", "owner": "evidence", "evidence_type": "vendor_record", "default_required": true},
+    "duplicate_payment_screen": {"label": "重复付款筛查来源", "kind": "risk_check", "owner": "evidence", "evidence_type": "duplicate_payment_check", "default_required": true},
+    "three_way_amount_match": {"label": "三单金额匹配", "kind": "cross_check", "owner": "compiler", "default_required": true, "required_policy_values": ["amount_tolerance_percent", "allowed_amount_basis_by_subject", "comparable_tax_bases", "comparable_coverages"]},
+    "no_active_duplicate": {"label": "无仍具经济效力的重复付款", "kind": "cross_check", "owner": "compiler", "default_required": true, "required_policy_values": ["duplicate_search_window"]},
+
+    "invoice_number": {"label": "发票号码", "kind": "field", "owner": "evidence", "default_required": true},
+    "supplier": {"label": "供应商/开票方", "kind": "field", "owner": "evidence", "default_required": true},
+    "buyer": {"label": "购买方/收票方", "kind": "field", "owner": "evidence", "default_required": true},
+    "invoice_date": {"label": "发票日期", "kind": "field", "owner": "evidence", "default_required": true},
+    "amount_total": {"label": "金额/总计", "kind": "field", "owner": "evidence", "default_required": true},
+    "currency_tax": {"label": "币种/税务信息（兼容字段）", "kind": "field", "owner": "evidence", "default_required": true},
+    "currency": {"label": "币种", "kind": "field", "owner": "evidence", "default_required": true},
+    "tax_treatment": {"label": "税务处理", "kind": "field", "owner": "evidence", "default_required": true},
+    "source_traceability": {"label": "上传附件来源链可追溯", "kind": "visual", "owner": "evidence", "default_required": true},
+    "line_items_product_title": {"label": "商品行/服务标题", "kind": "field", "owner": "evidence", "default_required": false},
+    "signature_or_authorized_signatory": {"label": "签名/授权签署", "kind": "visual", "owner": "evidence", "default_required": false},
+    "template_match": {"label": "模板/版式匹配", "kind": "risk_check", "owner": "evidence", "default_required": false, "required_policy_values": ["invoice_template_baseline_ref"]},
+
+    "po_number": {"label": "采购订单号", "kind": "field", "owner": "evidence", "default_required": false},
+    "po_ref": {"label": "采购订单引用", "kind": "field", "owner": "evidence", "default_required": false},
+    "po_amount": {"label": "采购订单金额", "kind": "field", "owner": "evidence", "default_required": false},
+    "po_date": {"label": "采购订单日期", "kind": "field", "owner": "evidence", "default_required": false},
+    "grn_number": {"label": "收货记录号", "kind": "field", "owner": "evidence", "default_required": false},
+    "received_quantity": {"label": "已收数量", "kind": "field", "owner": "evidence", "default_required": false},
+    "inspection_status": {"label": "验收状态", "kind": "field", "owner": "evidence", "default_required": false},
+    "vendor_status": {"label": "供应商状态", "kind": "field", "owner": "evidence", "default_required": false},
+    "vendor_id": {"label": "供应商编号", "kind": "field", "owner": "evidence", "default_required": false},
+    "bank_last_four": {"label": "银行账户尾号", "kind": "field", "owner": "evidence", "default_required": false},
+    "duplicate_invoice_found": {"label": "重复发票命中", "kind": "field", "owner": "evidence", "default_required": false},
+    "prior_payment_found": {"label": "历史付款命中", "kind": "field", "owner": "evidence", "default_required": false},
+    "clearing_document": {"label": "清账凭证", "kind": "field", "owner": "evidence", "default_required": false},
+    "payment_reference": {"label": "付款引用", "kind": "field", "owner": "evidence", "default_required": false},
+
+    "invoice_fields_valid": {"label": "发票必填字段有效", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["invoice"], "required_policy_values": ["jurisdiction_tax_rules"]},
+    "invoice_calculation_valid": {"label": "发票内部计算有效", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["invoice"], "required_policy_values": ["invoice_calculation_rounding_tolerance"]},
+    "three_way_quantity_match": {"label": "三单数量匹配", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["invoice", "purchase_order", "goods_receipt_or_service_acceptance"], "required_policy_values": ["quantity_matching_tolerance", "comparable_coverages"]},
+    "vendor_identity_active": {"label": "供应商身份有效且启用", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["vendor_identity"]},
+    "vendor_bank_change_record": {"label": "供应商银行变更记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "vendor_bank_account_authorized": {"label": "供应商收款账户已授权", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["vendor_identity", "vendor_bank_change_record"], "required_policy_values": ["bank_change_cooling_period"]},
+    "approval_matrix": {"label": "审批权限矩阵", "kind": "document", "owner": "evidence", "default_required": true},
+    "invoice_approval_record": {"label": "发票审批记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "approval_authority_satisfied": {"label": "审批权限满足", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["approval_matrix", "invoice_approval_record"], "required_policy_values": ["approval_authority_limits"]},
+    "sod_control_record": {"label": "职责分离控制记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "sod_control_satisfied": {"label": "职责分离控制满足", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["sod_control_record"]},
+    "payment_release_record": {"label": "付款释放记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "payment_release_authorized": {"label": "付款释放已授权", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["payment_release_record"], "required_policy_values": ["payment_release_thresholds"]},
+    "contract_or_sow": {"label": "合同/工作说明书", "kind": "document", "owner": "evidence", "default_required": true},
+    "service_acceptance": {"label": "服务验收记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "non_po_contract_match": {"label": "非 PO 合同发票匹配", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["invoice", "contract_or_sow", "service_acceptance"], "required_policy_values": ["contract_matching_tolerance", "comparable_coverages"]},
+    "tax_and_account_coding_record": {"label": "税务与会计编码记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "tax_and_account_coding_valid": {"label": "税务与会计编码有效", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["tax_and_account_coding_record"], "required_policy_values": ["jurisdiction_tax_rules"]},
+    "exception_hold_record": {"label": "例外/Hold 记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "no_unresolved_payment_hold": {"label": "无未解决的付款 Hold", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["exception_hold_record"]},
+    "audit_trail_record": {"label": "证据审计链记录", "kind": "document", "owner": "evidence", "default_required": true},
+    "audit_chain_complete": {"label": "证据审计链完整", "kind": "cross_check", "owner": "reviewer", "default_required": true, "premise_requirements": ["audit_trail_record"], "required_policy_values": ["record_retention_period"]}
+  },
+  "profiles": {
+    "legacy_three_way": [
+      {"id": "invoice", "required": true},
+      {"id": "invoice_calculation_valid", "required": true},
+      {"id": "purchase_order", "required": true},
+      {"id": "goods_receipt", "required": true},
+      {"id": "vendor_record", "required": true},
+      {"id": "duplicate_payment_check", "required": true}
+    ],
+    "invoice_only": [
+      {"id": "invoice", "required": true},
+      {"id": "invoice_number", "required": true},
+      {"id": "supplier", "required": true},
+      {"id": "buyer", "required": true},
+      {"id": "invoice_date", "required": true},
+      {"id": "amount_total", "required": true},
+      {"id": "currency_tax", "required": true},
+      {"id": "source_traceability", "required": true},
+      {"id": "invoice_calculation_valid", "required": true},
+      {"id": "line_items_product_title", "required": false},
+      {"id": "signature_or_authorized_signatory", "required": false},
+      {"id": "template_match", "required": false}
+    ],
+    "ap_lite_po": [
+      {"id": "invoice", "required": true},
+      {"id": "invoice_calculation_valid", "required": true},
+      {"id": "purchase_order", "required": true},
+      {"id": "goods_receipt_or_service_acceptance", "required": true},
+      {"id": "vendor_identity", "required": true},
+      {"id": "duplicate_payment_screen", "required": true}
+    ],
+    "invoice_validation": [
+      {"id": "invoice", "required": true},
+      {"id": "currency", "required": true},
+      {"id": "tax_treatment", "required": true},
+      {"id": "invoice_fields_valid", "required": true},
+      {"id": "invoice_calculation_valid", "required": true}
+    ],
+    "three_way_control": [
+      {"id": "invoice", "required": true},
+      {"id": "invoice_calculation_valid", "required": true},
+      {"id": "purchase_order", "required": true},
+      {"id": "goods_receipt_or_service_acceptance", "required": true},
+      {"id": "three_way_quantity_match", "required": true}
+    ],
+    "duplicate_control": [
+      {"id": "invoice", "required": true},
+      {"id": "invoice_calculation_valid", "required": true},
+      {"id": "duplicate_payment_screen", "required": true}
+    ],
+    "vendor_control": [
+      {"id": "vendor_identity", "required": true},
+      {"id": "vendor_identity_active", "required": true}
+    ],
+    "bank_change_control": [
+      {"id": "vendor_identity", "required": true},
+      {"id": "vendor_bank_change_record", "required": true},
+      {"id": "vendor_bank_account_authorized", "required": true}
+    ],
+    "approval_control": [
+      {"id": "approval_matrix", "required": true},
+      {"id": "invoice_approval_record", "required": true},
+      {"id": "approval_authority_satisfied", "required": true}
+    ],
+    "sod_control": [
+      {"id": "sod_control_record", "required": true},
+      {"id": "sod_control_satisfied", "required": true}
+    ],
+    "payment_release_control": [
+      {"id": "payment_release_record", "required": true},
+      {"id": "payment_release_authorized", "required": true}
+    ],
+    "non_po_contract_control": [
+      {"id": "invoice", "required": true},
+      {"id": "invoice_calculation_valid", "required": true},
+      {"id": "contract_or_sow", "required": true},
+      {"id": "service_acceptance", "required": true},
+      {"id": "non_po_contract_match", "required": true}
+    ],
+    "tax_account_coding_control": [
+      {"id": "tax_and_account_coding_record", "required": true},
+      {"id": "tax_and_account_coding_valid", "required": true}
+    ],
+    "exception_hold_control": [
+      {"id": "exception_hold_record", "required": true},
+      {"id": "no_unresolved_payment_hold", "required": true}
+    ],
+    "audit_control": [
+      {"id": "audit_trail_record", "required": true},
+      {"id": "audit_chain_complete", "required": true}
+    ]
+  }
+}

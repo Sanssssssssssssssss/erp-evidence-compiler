@@ -1,0 +1,53 @@
+{
+  "pack_id": "evidence_action_review_v1",
+  "version": "1",
+  "requirement_pack_version": "evidence_action_review_v1",
+  "policy_version": "admitted_evidence_review_v1",
+  "execution_mode": "evidence_review",
+  "requires_action_proposal": true,
+  "policy_basis": {
+    "source": "Frozen business materials and a proposed high-risk action",
+    "rules": [
+      "This capability provides independently reviewed semantic evidence, not the legacy registered-resolver guarantee.",
+      "The proposal is a candidate, never evidence for its own correctness.",
+      "Observed facts must retain exact source quotes or revision-bound record fields.",
+      "The Executor proposes relationships; the independent Verifier evaluates their meaning against the complete CHECK source scope.",
+      "Required calculations use replayable tools. Their results prove the computation, not the semantic interpretation of its operands.",
+      "The Kernel checks source identity, proof closure, calculation replay, and agreement with the registered terminal relationship; it does not prove natural-language entailment.",
+      "Grounded conflict is CONTRADICTED. Missing or ambiguous evidence is NOT_FOUND."
+    ]
+  },
+  "requirements": {
+    "erp_action_plan_valid": {
+      "label": "The proposed actions have independently reviewed support in the frozen business evidence",
+      "kind": "cross_check",
+      "owner": "reviewer",
+      "default_required": true,
+      "premise_requirements": [],
+      "required_policy_values": []
+    }
+  },
+  "profiles": {
+    "erp_action_plan": [{"id": "erp_action_plan_valid", "required": true}]
+  },
+  "planning_hints": {
+    "erp_action_plan_valid": {
+      "target_predicate": "evidence.proposed_actions_are_supported",
+      "capability": "erp_action_plan_review",
+      "activation": "explicit"
+    }
+  },
+  "proof_signatures": [{
+    "signature_id": "evidence_action_review",
+    "version": "1",
+    "requirement_id": "erp_action_plan_valid",
+    "root_composition": "ALL_REQUIRED",
+    "required_policy_refs": [],
+    "facets": [{
+      "id": "complete_action_plan",
+      "required_policy_refs": [],
+      "proof_paths": [{"minimum_proof_terms": ["CLAIM", "BINDING"]}],
+      "semantic_contract": "Each evidence_review CHECK requires grounded Claims and one independently accepted terminal Binding. CHECK_SATISFIED means SUPPORTED; CHECK_VIOLATED means CONTRADICTED. When requires_calculation is sealed true, the terminal proof must consume a replayable calculation. Every submitted calculation must be independently accepted, with every terminal result referenced by the Binding. A false condition can justify cancellation; numeric results have no universal business polarity. The Verifier supplies strong_status_links only for boolean results decisive for the whole current proposition, and Kernel checks their replayed polarity. Arithmetic alone does not establish authorization or identity. Semantic-only checks must not fabricate boolean Witnesses. Every CHECK's complete source scope must be examined, but only relevant source observations enter its proof. This signature must not be used for registered_resolver contracts or to reinterpret old checkpoints."
+    }]
+  }]
+}

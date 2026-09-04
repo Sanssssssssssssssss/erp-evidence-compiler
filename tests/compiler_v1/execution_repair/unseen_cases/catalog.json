@@ -1,0 +1,90 @@
+{
+  "templates": [
+    {
+      "id": "supplier_payout_change.v1",
+      "protects": ["res.partner.update_master"],
+      "applicable_stages": ["approve"],
+      "applies_when": "The proposed supplier master edit changes where payments will be sent. Review payout-account identity and independent authorization; a general address-change procedure cannot authorize payment redirection.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "supplier_change_matches_signed_request", "resolver": "semantic_evidence", "observation": "The proposal changes only the payout account of the exact active supplier in the admitted ERP record, from that record's current account to the account requested by its registered signatory. Supplier identity and the requested destination must agree across the record and signed request; do not treat the proposal as evidence."},
+        {"id": "supplier_change_independent_authorization", "resolver": "semantic_evidence", "observation": "An independent employee verified the same supplier and destination using the contact already registered in the ERP record, and an authorized Treasury reviewer separately approved that exact change. A requester's new contact details or approval for another account do not satisfy this check. Apply the admitted policy's role-separation rule."}
+      ]
+    },
+    {
+      "id": "supplier_address_change.v1",
+      "protects": ["res.partner.update_master"],
+      "applicable_stages": ["approve"],
+      "applies_when": "The proposed supplier master edit changes only a postal or delivery address and leaves the payout account unchanged. This procedure does not authorize bank or payout-account changes.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "supplier_address_request_authorized", "resolver": "semantic_evidence", "observation": "The proposed address-only edit matches an authenticated supplier request and the admitted address-change policy; payout details are not changed."}
+      ]
+    },
+    {
+      "id": "quality_hold_release.v1",
+      "protects": ["stock.lot.release_hold"],
+      "applicable_stages": ["approve"],
+      "applies_when": "The lot is held for a quality or inspection reason. Release requires the admitted quality-release procedure, not just warehouse administrative permission.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "quality_release_matches_target", "resolver": "semantic_evidence", "observation": "The proposal targets the admitted held lot and product, and a signed Quality release authorization explicitly covers that same lot and product under the admitted policy. A document for another lot is not transferable; an explicit denial for the target is conflicting evidence."},
+        {"id": "quality_release_has_no_blocking_deviation", "resolver": "semantic_evidence", "observation": "The target lot satisfies the policy's inspection and deviation requirements: its inspection result permits release and no blocking deviation remains open. Use the target's records and inspection/deviation documents, not an unrelated passing certificate or the proposed released state."}
+      ]
+    },
+    {
+      "id": "administrative_hold_release.v1",
+      "protects": ["stock.lot.release_hold"],
+      "applicable_stages": ["approve"],
+      "applies_when": "The hold is solely a warehouse administrative hold, with no quality or inspection block. Warehouse authorization cannot waive a quality hold.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "administrative_release_authorized", "resolver": "semantic_evidence", "observation": "The admitted hold reason is administrative only, and warehouse authorization explicitly covers the proposed target and release without overriding any quality restriction."}
+      ]
+    }
+  ],
+  "proof_recipes": {
+    "supplier_change_matches_signed_request": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "scope_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["permitted fields", "supplier identity requirement", "authorized signatory requirement"]},
+        {"group_id": "request_and_registry", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["active supplier identity", "current payout account", "registered signatory", "signed requested destination"]}
+      ]
+    },
+    "supplier_change_independent_authorization": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "authorization_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["callback channel requirement", "Treasury authority", "role separation"]},
+        {"group_id": "independent_records", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["pre-existing callback contact", "callback actor and result", "supplier and account confirmed", "Treasury approval scope and signer"]}
+      ]
+    },
+    "supplier_address_request_authorized": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "address_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["address-change authority"]},
+        {"group_id": "address_request", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["supplier identity", "authenticated address request", "unchanged payout details"]}
+      ]
+    },
+    "quality_release_matches_target": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "quality_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["release authority", "lot and product specificity"]},
+        {"group_id": "lot_and_authorization", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["held lot identity", "held product", "signed release authorization or denial", "document target identity"]}
+      ]
+    },
+    "quality_release_has_no_blocking_deviation": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "deviation_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["inspection acceptance requirement", "blocking deviation rule"]},
+        {"group_id": "lot_inspection", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["target inspection result", "deviation lot", "deviation blocking classification", "deviation state"]}
+      ]
+    },
+    "administrative_release_authorized": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "administrative_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["warehouse release scope", "quality exceptions"]},
+        {"group_id": "administrative_authority", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["hold reason", "target lot", "warehouse approval"]}
+      ]
+    }
+  }
+}

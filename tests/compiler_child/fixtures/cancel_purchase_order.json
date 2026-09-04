@@ -1,0 +1,64 @@
+{
+  "task_objective": "Review whether the proposed cancellation of the disrupted purchase order is supported by the admitted evidence. Do not execute the cancellation.",
+  "sources": [
+    {
+      "source_id": "policy:cancellation",
+      "name": "cancellation-policy.txt",
+      "evidence_type": "policy",
+      "source_content": "A purchase order may be cancelled only when it is the exact commitment affected by the admitted disruption, its current revision is unchanged, it is unlocked, it has no posted vendor bill, and no unaffected commitment is included in the proposal.",
+      "provenance": {"role": "instruction"}
+    },
+    {
+      "source_id": "evidence:incident",
+      "name": "incident-and-order-snapshot.txt",
+      "evidence_type": "business_record",
+      "source_content": "Incident INC-77 records that vendor vendor:acme cannot fulfil purchase.order:42 for product PART-7. The affected order is for quantity 10 at unit cost 12.50, planned arrival 7 days, origin sale.order:SO-9. No other purchase or manufacturing commitment is affected by INC-77.",
+      "provenance": {"role": "evidence"}
+    },
+    {
+      "source_id": "purchase.order:42",
+      "source_content": "{\"fields\":{\"blocking_vendor_bill_refs\":[],\"locked\":false,\"state\":\"purchase\",\"vendor_bill_states\":{\"account.move:91\":\"draft\"}},\"model\":\"derived.purchase_order_cancellation_facts\",\"record_ref\":\"purchase.order:42\",\"revision\":\"dbeef4c93f99519e742d1d5c928e57e78acd1cab2b60f1308680a43020c7c6bd\"}",
+      "source_fingerprint": "4120ba5858e3406d0ae9e83b69c085bc9ca2c2f1f00e96be78f10c612753a0e1",
+      "already_persisted": true,
+      "record_model": "derived.purchase_order_cancellation_facts",
+      "record_revision": "dbeef4c93f99519e742d1d5c928e57e78acd1cab2b60f1308680a43020c7c6bd",
+      "provenance": {
+        "role": "evidence",
+        "view_model": "derived.purchase_order_cancellation_facts",
+        "source_records": {
+          "odoo:purchase.order:42": {"revision": "write-date:r1", "fingerprint": "65eda303d372d2bcff6b41cede1911eb4e0f8e8791eb0f92dae1a4a2b4a6219f"},
+          "odoo:account.move:91": {"revision": "bill-write-date:r1", "fingerprint": "95ecf62d7dc400fd9d5215eded7ed79f4aa8019128247a7c3d6e1f16624ff44c"}
+        }
+      }
+    }
+  ],
+  "proposals": [
+    {
+      "proposal_id": "proposal:cancel-po-42:r1",
+      "actions": [
+        {
+          "action_id": "cancel_disrupted_po",
+          "stage": "cancel",
+          "record_ref": "purchase.order:42",
+          "action": "purchase.order.button_cancel",
+          "arguments": {
+            "record_revision": "dbeef4c93f99519e742d1d5c928e57e78acd1cab2b60f1308680a43020c7c6bd",
+            "values": {
+              "state": "purchase",
+              "vendor_ref": "vendor:acme",
+              "product_code": "PART-7",
+              "quantity": 10,
+              "unit_cost": 12.5,
+              "planned_arrival_days": 7,
+              "origin_refs": ["sale.order:SO-9"]
+            }
+          }
+        }
+      ],
+      "target_record_refs": ["purchase.order:42"],
+      "expected_preconditions": {
+        "purchase.order:42": {"upstream_revision": "dbeef4c93f99519e742d1d5c928e57e78acd1cab2b60f1308680a43020c7c6bd"}
+      }
+    }
+  ]
+}

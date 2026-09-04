@@ -1,0 +1,5 @@
+{
+  "routes": {"release-lot": "quality_hold_release.v1"},
+  "semantic_status": "CONTRADICTED",
+  "rationale": "The exact proposed lot has an explicit Quality denial, failed inspection and open blocking deviation. A passing certificate names a different lot. This assertion is not sent to any model."
+}

@@ -1,0 +1,90 @@
+{
+  "templates": [
+    {
+      "id": "travel_reimbursement.v1",
+      "protects": ["expense.claim.post_reimbursement"],
+      "applicable_stages": ["approve"],
+      "applies_when": "An employee seeks repayment of actual business-trip expenses supported by receipts. Reconcile actual eligible costs and approval; this is not a daily allowance without receipts.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "travel_receipts_and_limit", "resolver": "semantic_evidence", "observation": "The proposed repayment matches the admitted claim for the same employee and trip. Ground each eligible receipt amount and currency, calculate their sum using the numeric tool, compare it to the claimed amount and the applicable policy limit. Apply exclusions stated in the policy. A receipt or amount for another trip cannot contribute."},
+        {"id": "travel_approval_and_unpaid_state", "resolver": "semantic_evidence", "observation": "The admitted claim is still unpaid and its employee, trip, eligible cost scope and amount are covered by the required independent manager's signed approval. Compare the proposal with admitted records; the proposed posting itself is not evidence of approval or unpaid status."}
+      ]
+    },
+    {
+      "id": "travel_daily_allowance.v1",
+      "protects": ["expense.claim.post_reimbursement"],
+      "applicable_stages": ["approve"],
+      "applies_when": "The claim is a policy-defined fixed per-diem allowance calculated from eligible days, not repayment of actual receipt costs.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "daily_allowance_authorized", "resolver": "semantic_evidence", "observation": "The admitted policy actually allows per-diem treatment for this trip and the proposed allowance has the required authorization; actual-cost receipts do not by themselves establish a per-diem entitlement."}
+      ]
+    },
+    {
+      "id": "personal_data_disclosure.v1",
+      "protects": ["hr.employee.export_personal_data"],
+      "applicable_stages": ["approve"],
+      "applies_when": "Identifiable employee-level data will be transmitted to an external recipient. Review the exact data and purpose plus recipient-specific disclosure authority; this is not an anonymous aggregate report.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "disclosure_scope_matches_request", "resolver": "semantic_evidence", "observation": "The proposed dataset revision, employee population, field list, recipient and purpose agree with the admitted export manifest and request and stay within the admitted policy's allowed scope. Named employee rows must not be treated as anonymous aggregates."},
+        {"id": "disclosure_recipient_authority", "resolver": "semantic_evidence", "observation": "Every required authorization for the exact recipient, dataset, purpose and disclosure is grounded in the supplied materials. Apply the admitted policy's agreement and signoff requirements; directory registration, a transfer schedule or permission to prepare a file is not a substitute for disclosure authorization. Missing documents are unknown evidence, not proof that approval was denied or granted."}
+      ]
+    },
+    {
+      "id": "anonymous_workforce_report.v1",
+      "protects": ["hr.employee.export_personal_data"],
+      "applicable_stages": ["approve"],
+      "applies_when": "Only anonymous aggregate workforce statistics are transmitted, without employee identifiers or row-level personal details. This procedure cannot authorize an identifiable employee-level export.",
+      "requires_shared": [],
+      "checks": [
+        {"id": "anonymous_report_scope", "resolver": "semantic_evidence", "observation": "The actual admitted report contains only anonymous aggregates and satisfies the policy for that report and destination; a proposal label cannot establish anonymization."}
+      ]
+    }
+  ],
+  "proof_recipes": {
+    "travel_receipts_and_limit": {
+      "resolver": "semantic_evidence", "requires_calculation": true,
+      "evidence": [
+        {"group_id": "travel_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["eligible cost categories", "currency", "total limit", "exclusions"]},
+        {"group_id": "actual_costs", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["employee and trip identity", "claim amount and currency", "each eligible receipt amount and currency"]}
+      ]
+    },
+    "travel_approval_and_unpaid_state": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "approval_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["authorized approver", "role separation", "unpaid requirement"]},
+        {"group_id": "claim_and_approval", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["current reimbursement status", "approved claim, trip, employee and amount", "approval signer"]}
+      ]
+    },
+    "daily_allowance_authorized": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "allowance_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["per-diem eligibility and authority"]},
+        {"group_id": "allowance_request", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["trip and allowance approval"]}
+      ]
+    },
+    "disclosure_scope_matches_request": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "scope_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["allowed purpose", "allowed fields and population"]},
+        {"group_id": "manifest_and_request", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["dataset revision", "employee population", "field list", "destination", "purpose"]}
+      ]
+    },
+    "disclosure_recipient_authority": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "disclosure_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["required agreement", "required disclosure signoff", "scope of preparing versus sending permission"]},
+        {"group_id": "recipient_authorizations", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["recipient identity", "agreement coverage if supplied", "signed authority for exact export if supplied"]}
+      ]
+    },
+    "anonymous_report_scope": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "aggregate_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["anonymous-report requirements"]},
+        {"group_id": "aggregate_material", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["actual report fields", "recipient", "report purpose"]}
+      ]
+    }
+  }
+}

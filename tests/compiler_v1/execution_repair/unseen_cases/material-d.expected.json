@@ -1,0 +1,5 @@
+{
+  "routes": {"send-roster": "personal_data_disclosure.v1"},
+  "semantic_status": "NOT_FOUND",
+  "rationale": "Dataset revision, allowed fields, population, recipient and purpose match. The supplied documents do not contain the required signed processing agreement or Privacy officer approval. They do not establish a denial or grant. Scope should be SUPPORTED and authorization NOT_FOUND, so the overall review must not authorize sending. This file is not model input."
+}

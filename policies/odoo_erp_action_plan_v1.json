@@ -1,0 +1,56 @@
+{
+  "pack_id": "odoo_erp_action_plan_v1",
+  "version": "2",
+  "requirement_pack_version": "odoo_erp_action_plan_v1",
+  "policy_version": "admitted_task_policy_v1",
+  "requires_action_proposal": true,
+  "policy_basis": {
+    "source": "An admitted task-policy source and immutable task-fact snapshot",
+    "rules": [
+      "The proposal is a candidate, never evidence for its own correctness.",
+      "Every material action, constraint, calculation, dependency, and objective claim must be grounded in admitted sources.",
+      "A conflict is CONTRADICTED; a necessary missing fact is NOT_FOUND."
+    ]
+  },
+  "requirements": {
+    "erp_action_plan_valid": {
+      "label": "The complete proposed ERP action plan is supported by the admitted task policy and facts",
+      "kind": "cross_check",
+      "owner": "reviewer",
+      "default_required": true,
+      "premise_requirements": [],
+      "required_policy_values": []
+    }
+  },
+  "profiles": {
+    "erp_action_plan": [
+      {"id": "erp_action_plan_valid", "required": true}
+    ]
+  },
+  "planning_hints": {
+    "erp_action_plan_valid": {
+      "target_predicate": "erp.proposed_action_plan_is_policy_and_fact_consistent",
+      "capability": "erp_action_plan_review",
+      "activation": "explicit"
+    }
+  },
+  "proof_signatures": [
+    {
+      "signature_id": "odoo_erp_action_plan_review",
+      "version": "1",
+      "requirement_id": "erp_action_plan_valid",
+      "root_composition": "ALL_REQUIRED",
+      "required_policy_refs": [],
+      "facets": [
+        {
+          "id": "complete_action_plan",
+          "required_policy_refs": [],
+          "proof_paths": [
+            {"minimum_proof_terms": ["WITNESS", "BINDING"]}
+          ],
+          "semantic_contract": "Each typed DAG CHECK is closed by one registered, replayable ResolverWitness over its exact frozen source closure and one terminal Binding. The proposal is input to the resolver contract, never evidence for itself. Return CONTRADICTED for a replayed conflict and NOT_FOUND when the source, resolver, or lineage is missing or stale."
+        }
+      ]
+    }
+  ]
+}

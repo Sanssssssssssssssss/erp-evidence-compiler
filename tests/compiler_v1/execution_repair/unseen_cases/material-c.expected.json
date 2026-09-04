@@ -1,0 +1,5 @@
+{
+  "routes": {"post-expense": "travel_reimbursement.v1"},
+  "semantic_status": "SUPPORTED",
+  "rationale": "Both receipts belong to the same employee/trip and were personally paid. USD 150 + 30 = 180 matches the claim and is within the USD 200 cap. The claim is unpaid and the distinct registered manager signed the exact amount and scope. This file is an offline expectation, not model input."
+}

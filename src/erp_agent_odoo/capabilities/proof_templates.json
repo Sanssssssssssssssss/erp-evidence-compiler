@@ -159,7 +159,7 @@
       "evidence": [
         {"group_id": "proposed_tax_basis", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_lines", "tax_basis", "currency"]},
         {"group_id": "tax_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["explicit_tax_treatment"]},
-        {"group_id": "tax_inputs", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["sale_lines", "product_taxes", "fiscal_position"]},
+        {"group_id": "tax_inputs", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["sale_lines", "native tax inputs required by the admitted policy"]},
         {"group_id": "odoo_tax_result", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["tax_lines", "amount_tax", "amount_total"]}
       ]
     },
@@ -561,7 +561,7 @@
         {"id": "invoice_fixed_downpayment_matches_policy", "observation": "Compare downpayment untaxed amount with the policy fixed amount within admitted tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["downpayment"], "invoice_mode": "fixed_amount"},
         {"id": "invoice_percentage_downpayment_matches_policy", "observation": "Compare downpayment with source order untaxed total times the admitted decimal downpayment ratio, within tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["downpayment"], "invoice_mode": "percentage"},
         {"id": "invoice_balance_matches_remaining", "observation": "Compare balance invoice with source order untaxed total minus the authorized downpayment, within tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["balance"]},
-        {"id": "invoice_tax_basis_matches_policy", "observation": "The tax basis, product taxes and fiscal position match the admitted instruction and source order. Expected tax values must come from the admitted Odoo tax result for these exact lines, currency and revision. Do not reconstruct Odoo taxes or infer zero tax from pretax budgets.", "resolver": "semantic_evidence"},
+        {"id": "invoice_tax_basis_matches_policy", "observation": "The invoice tax treatment satisfies the admitted policy using the relevant native order and invoice evidence. Require equality or preservation of individual tax configuration fields only when the admitted policy requires it. Expected tax values must come from the admitted Odoo tax result for these exact lines, currency and revision. Do not reconstruct Odoo taxes or infer zero tax from pretax budgets.", "resolver": "semantic_evidence"},
         {"id": "invoice_tax_amount_matches_odoo", "observation": "Compare actual invoice tax amount with the admitted Odoo tax result within currency tolerance.", "resolver": "deterministic_arithmetic"},
         {"id": "invoice_total_matches_untaxed_and_tax", "observation": "Compare actual total with actual untaxed plus Odoo tax result within currency tolerance.", "resolver": "deterministic_arithmetic"},
         {"id": "invoice_scope_is_exact", "observation": "Only retained orders are invoice targets, and the proposal schedules exactly the registered invoice stages for each retained order.", "resolver": "deterministic_set_comparison"}

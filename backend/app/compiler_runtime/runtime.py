@@ -95,11 +95,11 @@ PROMPT_VERSIONS = {
     "task_compiler": "typed_task_compiler_v27",
     "executor": "typed_evidence_executor_v31",
     "registered_executor": "registered_action_executor_v2",
-    "registered_verifier": "registered_action_verifier_v1",
+    "registered_verifier": "registered_action_verifier_v2_tool_submission",
     "evidence_executor": "bounded_evidence_executor_v9_field_batch",
-    "evidence_verifier": "bounded_evidence_verifier_v10_shared_context",
+    "evidence_verifier": "bounded_evidence_verifier_v11_tool_submission",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
-    "verifier": "typed_fine_verifier_v30",
+    "verifier": "typed_fine_verifier_v31_tool_submission",
 }
 _PROMPT_ROOT = Path(__file__).with_name("prompts")
 _TRACE_METADATA = {
@@ -2946,6 +2946,45 @@ class EvidenceCompilerRuntime:
         )
         response_hooks = _PhaseResponseHooks()
         tool_only = name == "executor" and prompt_version_key == "evidence_executor"
+        verifier_submission = name == "fine_verifier" and output_type in (VerificationBatch, EvidenceVerificationBatch)
+        if verifier_submission:
+            submitted = None
+            submission_attempts = 0
+            needs_candidate = any(tool.name == "reveal_candidate" for tool in tools)
+            candidate_revealed = not needs_candidate
+
+            async def submit_verification(_context: Any, raw: str) -> str:
+                nonlocal submitted, submission_attempts
+                submission_attempts += 1
+                try:
+                    validated = output_type.model_validate_json(raw)
+                except ValidationError as exc:
+                    if submission_attempts >= 2:
+                        raise ModelBehaviorError("Verifier exhausted its one submission correction") from exc
+                    raise
+                if not candidate_revealed and not getattr(validated, "plan_issue", "").strip():
+                    raise ModelBehaviorError("Verifier must inspect the revealed candidate in a prior turn before submitting")
+                submitted = validated
+                return _tool_json({"ok": True})
+
+            def finish_verification(_context: Any, results: Any) -> ToolsToFinalOutputResult:
+                nonlocal candidate_revealed
+                if any(item.tool.name == "reveal_candidate" and json.loads(item.output).get("ok") for item in results):
+                    candidate_revealed = True
+                return ToolsToFinalOutputResult(is_final_output=submitted is not None, final_output=submitted)
+
+            tools = [*tools, _function_tool(
+                "submit_verification", "Submit the final verification batch. Every assessment requires status. Schema errors allow one correction by the Verifier; no verdict is supplied by the tool.",
+                output_type, submit_verification,
+            )]
+            tool_use_behavior = finish_verification
+            tool_only = True
+            max_turns = 4 if max_turns is None else max(2, max_turns)
+            prompt += (
+                "\nSubmit your final result through submit_verification, never as final text. "
+                "If it returns schema errors, correct your submission using your own review. "
+                "You have one correction; error messages supply no business verdict."
+            )
         agent = Agent(
             name=name,
             instructions=prompt,
@@ -3005,6 +3044,9 @@ class EvidenceCompilerRuntime:
             attempt_started = time.perf_counter()
             result = None
             response_hooks.responses.clear()
+            if verifier_submission:
+                submitted = None
+                candidate_revealed = not needs_candidate
             try:
                 attempt_input = model_input
                 if attempt and session is not None:
@@ -3036,9 +3078,9 @@ class EvidenceCompilerRuntime:
                 if tool_only:
                     completion = tool_use_behavior(None, [])
                     if not completion.is_final_output:
-                        raise ModelBehaviorError("Executor ended without submitting every focused CHECK through real tools")
+                        raise ModelBehaviorError(f"{name} ended without completing required submissions through real tools")
                     # The SDK stringifies final_output when output_type is None.
-                    # Read the typed summary from accepted submissions, never parse that text.
+                    # Read the typed result from accepted submissions, never parse that text.
                     parsed = completion.final_output
                 else:
                     parsed = result.final_output

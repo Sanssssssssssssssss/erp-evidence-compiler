@@ -182,23 +182,30 @@ def test_verifier_contract_matches_execution_mode():
     assert "predicate_program" in " ".join(_verifier_contracts([legacy]))
 
 
-def test_verifier_output_schema_is_strict(monkeypatch):
+def test_verifier_submission_schema_requires_status(monkeypatch):
+    import asyncio
+    import json
     captured = []
     configs = []
     class CapturingAgent:
         def __init__(self, **kwargs):
-            captured.append(kwargs["output_type"])
+            captured.append(kwargs)
     monkeypatch.setattr("app.compiler_runtime.runtime.Agent", CapturingAgent)
     monkeypatch.setattr("app.compiler_runtime.runtime.build_run_config", lambda *_args, **kwargs:
         configs.append(kwargs) or object())
-    monkeypatch.setattr("app.compiler_runtime.runtime.run_agent_sync", lambda *_args, **_kwargs:
-        SimpleNamespace(final_output=VerificationBatch(assessments=[]), raw_responses=[]))
+    def run(*_args, **_kwargs):
+        tool = next(t for t in captured[0]['tools'] if t.name == 'submit_verification')
+        assert json.loads(asyncio.run(tool.on_invoke_tool(None, '{"assessments": []}'))) == {'ok': True}
+        return SimpleNamespace(final_output='Unused SDK text', raw_responses=[])
+    monkeypatch.setattr("app.compiler_runtime.runtime.run_agent_sync", run)
     settings = SimpleNamespace(llm_model="offline", llm_temperature=0, llm_thinking_type="high",
         llm_base_url="https://api.commandcode.ai/provider/v1", evidence_reviewer_timeout_seconds=1)
     runtime = EvidenceCompilerRuntime(SimpleNamespace(available=True, settings=settings, calls=[]), settings=settings)
     runtime._run_phase(name="fine_verifier", prompt_file="evidence_verifier.md", payload={},
         output_type=VerificationBatch, max_turns=None)
-    assert captured[0].is_strict_json_schema()
+    assert captured[0]['output_type'] is None
+    schema = captured[0]['tools'][0].params_json_schema
+    assert 'status' in schema['$defs']['CheckAssessment']['required']
     assert configs[0]["disable_timeout"] is True
     assert "timeout_seconds" not in configs[0]
 

@@ -92,6 +92,10 @@ def test_phase_wire_contract_and_invalid_text_fail_closed(monkeypatch, phase):
     if phase == 'executor':
         assert captured[0]['output_type'] is None
         assert captured[0]['model_settings'].tool_choice is None
+    elif phase == 'fine_verifier':
+        assert captured[0]['output_type'] is None
+        assert [t.name for t in captured[0]['tools']] == ['submit_verification']
+        assert captured[0]['model_settings'].tool_choice is None
     else:
         assert captured[0]['output_type'].is_strict_json_schema()
 

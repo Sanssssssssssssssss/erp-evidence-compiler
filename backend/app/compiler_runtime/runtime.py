@@ -4681,9 +4681,10 @@ def _sandbox_tools(
             _RunRegisteredCheckInput, compute_planned_witnesses,
         ))
     if reference_ids_only and not resolver_only:
-        from erp_agent_odoo.tax_invoice import TEMPLATE_ID, compare_tax_invoice
+        from erp_agent_odoo.tax_invoice import TEMPLATE_ID, compare_tax_invoice, tax_invoice_enabled
         tax_checks = {node.id: node for node in numeric_checks
-                      if isinstance(node.action_contract, ERPReviewContract) and node.action_contract.template_id == TEMPLATE_ID}
+                      if tax_invoice_enabled() and isinstance(node.action_contract, ERPReviewContract)
+                      and node.action_contract.template_id == TEMPLATE_ID}
         if tax_checks:
             async def verify_tax_invoice(_context: Any, raw: str) -> str:
                 data = _RunRegisteredCheckInput.model_validate_json(raw)

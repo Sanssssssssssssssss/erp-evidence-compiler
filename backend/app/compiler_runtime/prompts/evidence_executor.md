@@ -52,7 +52,7 @@ review; being a snapshot does not disqualify it. Require newer evidence only whe
 the CHECK/policy requires freshness the admitted record cannot establish.
 No native source means a gap, not a call to an unavailable API.
 
-For cn_tax_invoice_review.v1, call verify_tax_invoice with check_id. It binds the
+For cn_tax_invoice_review.v1, if available, call verify_tax_invoice with check_id. It binds the
 invoice and previously captured API receipt, returning comparisons and proof
 references. Use those references in your own submission. DOCUMENTATION_ONLY is
 a provider example, never a live verification; a lookup failure is not a fake-invoice verdict.

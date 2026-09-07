@@ -24,6 +24,7 @@ def invoice(**changes):
 
 
 def test_documented_request_fields_and_sdk(monkeypatch):
+    monkeypatch.setenv("ERP_COMPILER_TAX_INVOICE_ENABLED", "1")
     legacy = tax.request_fields(invoice().record_fields)
     digital = tax.request_fields(invoice(invoice_type="31", invoice_number="26000000000000000001").record_fields)
     ordinary = tax.request_fields(invoice(invoice_type="10", verify_code="123456").record_fields)
@@ -61,6 +62,7 @@ def test_provider_receipts_and_documentation_are_not_conflated():
 
 
 def test_capture_is_opt_in_preseal_and_durable(tmp_path, monkeypatch):
+    monkeypatch.setenv("ERP_COMPILER_TAX_INVOICE_ENABLED", "1")
     raw = {"RequestId": "offline-test", "Data": "broken json"}
     calls = []
     monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "offline-test")
@@ -140,7 +142,8 @@ def tool_setup(defect):
 
 
 @pytest.mark.parametrize("defect", ["", "amount_mismatch", "revision", "receipt_binding", "fingerprint", "scope", "check", "forged_value"])
-def test_executor_tool_binds_exact_sides_without_a_verdict(defect):
+def test_executor_tool_binds_exact_sides_without_a_verdict(defect, monkeypatch):
+    monkeypatch.setenv("ERP_COMPILER_TAX_INVOICE_ENABLED", "1")
     node, state, tool = tool_setup(defect)
     arguments = {"check_id": "other" if defect == "check" else node.id}
     if defect == "forged_value":
@@ -161,3 +164,30 @@ def test_executor_tool_binds_exact_sides_without_a_verdict(defect):
     assert result == json.loads(asyncio.run(tool.on_invoke_tool(None, json.dumps(arguments))))
     assert before == (state.evidence_ir.content_hash(), len(state.calculation_witnesses))
     assert "verify_tax_invoice" not in {t.name for t in _sandbox_tools(state, reference_ids_only=True)}
+
+
+def test_feature_defaults_off_and_disables_existing_tools(tmp_path, monkeypatch):
+    monkeypatch.delenv("ERP_COMPILER_TAX_INVOICE_ENABLED", raising=False)
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "offline-test")
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "offline-test")
+    original = [tax.wire(invoice())]
+    assert not tax.tax_invoice_enabled()
+    assert tax.collect_tax_invoice_sources(original, tmp_path / "unused") == original
+    assert not (tmp_path / "unused").exists()
+    with pytest.raises(ValueError, match="disabled"):
+        tax._call_aliyun({})
+    disabled = load_proof_catalog()
+    assert len(disabled["templates"]) == 6
+    assert tax.TEMPLATE_ID not in {t["id"] for t in disabled["templates"]}
+    assert "tax_invoice_registry_verified" not in disabled["proof_recipes"]
+    monkeypatch.setenv("ERP_COMPILER_TAX_INVOICE_ENABLED", "1")
+    enabled = load_proof_catalog()
+    assert tax.TEMPLATE_ID in {t["id"] for t in enabled["templates"]}
+    assert disabled["templates"] == [t for t in enabled["templates"] if t["id"] != tax.TEMPLATE_ID]
+    node, state, tool = tool_setup("")
+    monkeypatch.setenv("ERP_COMPILER_TAX_INVOICE_ENABLED", "0")
+    assert "verify_tax_invoice" not in {t.name for t in _sandbox_tools(state, reference_ids_only=True, numeric_checks=[node])}
+    result = json.loads(asyncio.run(tool.on_invoke_tool(None, json.dumps({"check_id": node.id}))))
+    assert not result["ok"] and "disabled" in result["error"]["message"]
+    assert not state.evidence_ir.claims and not state.calculation_witnesses
+    assert tax.collect_tax_invoice_sources(original, tmp_path / "unused") == original

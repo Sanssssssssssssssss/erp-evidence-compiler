@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from app.compiler_runtime.sandbox import SourceRecord
+from app.config import _bool_env
 from app.state.persistence import atomic_write_text
 
 INVOICE_MODEL = "cn.tax_invoice"
@@ -22,6 +23,10 @@ FIELD_MAP = {
     "buyer_name": "purchaserName", "buyer_tax_id": "purchaserTaxpayerNumber",
     "seller_name": "salerName", "seller_tax_id": "salerTaxpayerNumber",
 }
+
+
+def tax_invoice_enabled():
+    return _bool_env("ERP_COMPILER_TAX_INVOICE_ENABLED", False)
 
 
 def fingerprint(source):
@@ -70,6 +75,8 @@ def request_fields(fields):
 
 
 def _call_aliyun(query):
+    if not tax_invoice_enabled():
+        raise ValueError("Tax invoice verification is disabled")
     # Optional SDK owns authentication/signing; secrets never become evidence.
     from alibabacloud_ocr_api20210707.client import Client
     from alibabacloud_ocr_api20210707.models import VerifyVATInvoiceRequest
@@ -122,6 +129,8 @@ def receipt_source(invoice, response, *, mode, observed_at, query=None, raw_ref=
 def collect_tax_invoice_sources(sources, directory):
     """Explicit manifest opt-in only. Persist one observation per invoice/run."""
     result = list(sources)
+    if not tax_invoice_enabled():
+        return result
     for item in sources:
         provider = item.get("provenance", {}).get("verify_tax_invoice")
         if not provider:
@@ -175,6 +184,8 @@ def collect_tax_invoice_sources(sources, directory):
 
 def compare_tax_invoice(sandbox, node, allowed):
     """Bind both observed sides; return facts and existing calculator witnesses."""
+    if not tax_invoice_enabled():
+        raise ValueError("Tax invoice verification is disabled")
     contract = node.action_contract
     sources = {s.source_id: s for s in sandbox.source_records if s.source_id in allowed}
     targets = [s for s in sources.values() if s.source_id in contract.target_record_refs and s.record_model == INVOICE_MODEL]

@@ -18,8 +18,15 @@ _EVIDENCE_SOURCES = {
 
 
 def load_proof_catalog(catalog_path: str | Path | None = None) -> dict[str, Any]:
+    from erp_agent_odoo.tax_invoice import TEMPLATE_ID, tax_invoice_enabled
+
     path = Path(catalog_path) if catalog_path else Path(__file__).with_name("proof_templates.json")
-    return json.loads(path.read_text(encoding="utf-8"))
+    catalog = json.loads(path.read_text(encoding="utf-8"))
+    if not tax_invoice_enabled():
+        catalog["templates"] = [t for t in catalog.get("templates", []) if t["id"] != TEMPLATE_ID]
+        for check_id in ("tax_invoice_registry_verified", "tax_invoice_fields_match_receipt"):
+            catalog.get("proof_recipes", {}).pop(check_id, None)
+    return catalog
 
 
 def _compile_check(check: Mapping[str, Any], catalog: Mapping[str, Any]) -> dict[str, Any]:

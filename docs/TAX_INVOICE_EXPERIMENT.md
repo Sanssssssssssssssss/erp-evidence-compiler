@@ -10,8 +10,15 @@
 
 ## 开启方式
 
+默认关闭：`ERP_COMPILER_TAX_INVOICE_ENABLED=0`，不设置也等同关闭。关闭时新审核不加载税票模板，不提供核验工具，也不查询阿里云或写入核验回执；已有证明和冻结材料不改写。配置凭据或材料中的 `verify_tax_invoice` 标记不会自动开启功能。
+
+开关追加回归：285项通过；当前进程确认为关闭、目录保留原有6个模板。本次未调用模型或阿里云 API。
+
+只在需要时，在启动父 Agent 的进程环境中设置开关；修改配置后重启父 Agent：
+
 ```powershell
 python -m pip install -e '.[dev,tax-invoice]'
+$env:ERP_COMPILER_TAX_INVOICE_ENABLED = '1' # 开启；日常使用设为 '0'
 ```
 
 本机环境配置 `ALIBABA_CLOUD_ACCESS_KEY_ID`、`ALIBABA_CLOUD_ACCESS_KEY_SECRET`，临时凭据可加 `ALIBABA_CLOUD_SECURITY_TOKEN`。账号须已开通阿里云票证核验服务。工具使用官方 SDK 签名、固定官方 endpoint、关闭自动重试；不自动开通或购买服务。
@@ -60,6 +67,7 @@ python -m tests.compiler_child.tax_invoice_example
 # 离线验证
 python -m pytest tests/compiler_child/test_tax_invoice.py -q
 # 已配置原有 DeepSeek 测试环境后：一个真实模型 child run，阿里云仍为文档回放
+$env:ERP_COMPILER_TAX_INVOICE_ENABLED = '1'
 python -m tests.compiler_child.tax_invoice_example --run artifacts/tax-invoice-one-run
 ```
 

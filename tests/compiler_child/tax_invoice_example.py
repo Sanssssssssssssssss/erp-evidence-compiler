@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from app.compiler_runtime.sandbox import SourceRecord
-from erp_agent_odoo.tax_invoice import FIELD_MAP, INVOICE_MODEL, receipt_source, wire
+from erp_agent_odoo.tax_invoice import FIELD_MAP, INVOICE_MODEL, receipt_source, tax_invoice_enabled, wire
 
 HERE = Path(__file__).parent
 API_DOC = "https://help.aliyun.com/zh/ocr/developer-reference/api-ocr-api-2021-07-07-verifyvatinvoice"
@@ -53,6 +53,8 @@ def run(output):
     from erp_agent_odoo.capabilities.proof_dag import action_proposal_from_manager_request, load_proof_catalog
     from erp_agent_odoo.compiler_child.extension import _run_compiler, _write_json
 
+    if not tax_invoice_enabled():
+        raise ValueError("Set ERP_COMPILER_TAX_INVOICE_ENABLED=1 to run this optional tax-invoice experiment")
     # Credentials stay in the environment; this file never loads or copies a secret file.
     if os.environ.get("LLM_MODEL") != "deepseek/deepseek-v4-flash":
         raise ValueError("Set the existing DeepSeek test profile before this explicitly paid probe")

@@ -26,15 +26,21 @@ Recipe fact names describe possible applicable policy inputs, not extra business
 rules. Do not invent an absent policy rule or confuse it with missing evidence.
 For document text, bind_claim with a shortest unique exact quote and OMIT locator;
 Runtime computes the location. Never guess line numbers. For repeated text use
-a longer unique quote or explicitly disambiguate. For a structured record, bind_record_field_claim with its
-actual JSON pointer and revision. Text embedded in a record remains text: bind
-the field itself, not an invented structured child field.
+a longer unique quote or explicitly disambiguate. For a structured record, use
+bind_record_fields with record_ref, record_revision and a fields list. Group the
+needed fields of that record into one call, including text inside policy or scope
+records. Each item supplies field_path, predicate and optional confidence,
+attributes or claim_id. Bind the text field itself, not an invented child field.
 The field_path root is exactly record_fields: /amount, /approvers/0 or
 /screening/result, never /fields/amount, /record_fields/amount or dot notation.
-locator.record_ref is the admitted source_id; record_revision comes from that source.
-The record-field tool derives Claim source_id and subject from locator.record_ref;
-do not supply those duplicate fields or wrap locator in another record_field object.
+record_ref is the admitted source_id; record_revision comes from that source.
+The tool derives Claim source_id and subject from record_ref; do not repeat the
+record identity in each fields item or supply a locator wrapper.
 Omit value: Runtime resolves and preserves the exact JSON value/type at the locator.
+Read each result's ok/error. Successful rows retain their claims even if another
+fails; retry only failed fields. Use returned claim.id values, including reused IDs.
+The compact receipt retains observed values and claim metadata; complete locators
+remain in the proof store for the independent Verifier and Kernel.
 Reuse grounded Claims across CHECKs. Do not make up values for absent facts or infer live state from a
 Manager proposal. LIVE_ODOO requires an admitted native-state snapshot with source
 record provenance. Review its identity, revision and fields within this frozen

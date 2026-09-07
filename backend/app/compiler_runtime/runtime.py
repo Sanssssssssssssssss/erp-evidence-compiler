@@ -96,7 +96,7 @@ PROMPT_VERSIONS = {
     "executor": "typed_evidence_executor_v31",
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v1",
-    "evidence_executor": "bounded_evidence_executor_v8_applicable_evidence",
+    "evidence_executor": "bounded_evidence_executor_v9_field_batch",
     "evidence_verifier": "bounded_evidence_verifier_v10_shared_context",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v30",
@@ -120,6 +120,7 @@ _TRACE_METADATA = {
         "read_source",
         "bind_claim",
         "bind_record_field_claim",
+        "bind_record_fields",
         "compute_witness",
         "submit_check",
     ],
@@ -282,6 +283,20 @@ class _BindRecordFieldClaimInput(_RuntimeModel):
     confidence: str = "medium"
     attributes: dict[str, Any] = Field(default_factory=dict)
     claim_id: str = ""
+
+
+class _RecordFieldSelection(_RuntimeModel):
+    field_path: str
+    predicate: str
+    confidence: str = "medium"
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    claim_id: str = ""
+
+
+class _BindRecordFieldsInput(_RuntimeModel):
+    record_ref: str
+    record_revision: str
+    fields: list[_RecordFieldSelection] = Field(min_length=1)
 
 
 class _ComputeWitnessInput(_RuntimeModel):
@@ -4312,6 +4327,29 @@ def _sandbox_tools(
             ),
         )
 
+    async def bind_record_fields(_context: Any, raw: str) -> str:
+        data = _BindRecordFieldsInput.model_validate_json(raw)
+        error = source_scope_failure("bind_record_fields", data.record_ref)
+        if error:
+            return _observed_tool("bind_record_fields", lambda: error)
+        results = []
+        for field in data.fields:
+            result = json.loads(_observed_tool(
+                "bind_record_field_claim",
+                lambda: sandbox.bind_record_field_claim(
+                    source_id=data.record_ref, subject=data.record_ref,
+                    locator={"record_ref": data.record_ref, "record_revision": data.record_revision,
+                             "field_path": field.field_path},
+                    **field.model_dump(exclude={"field_path"}),
+                ),
+            ))
+            if result.get("ok"):
+                result["claim"] = {key: result["claim"][key]
+                                   for key in ("id", "predicate", "value", "confidence", "attributes")}
+            results.append({"field_path": field.field_path, **result})
+        return _tool_json({"ok": True, "record_ref": data.record_ref,
+                           "record_revision": data.record_revision, "results": results})
+
     async def compute_witness_tool(_context: Any, raw: str) -> str:
         data = compute_input.model_validate_json(raw)
         return _observed_tool(
@@ -4514,10 +4552,11 @@ def _sandbox_tools(
             bind_claim,
         ),
         _function_tool(
-            "bind_record_field_claim",
-            "Bind an observed record field. Runtime reads its exact typed value and derives source_id and subject from locator.record_ref. Do not supply value. Keep record_revision and field_path inside locator, without an extra record_field wrapper.",
-            _BindRecordFieldClaimInput,
-            bind_record_field_claim,
+            "bind_record_fields" if reference_ids_only else "bind_record_field_claim",
+            ("Bind selected fields from one admitted record and revision. Each fields item supplies field_path, predicate and optional claim metadata; never values. Results stay in input order with per-field ok/error. Successful fields are retained even if another fails; retry only failed fields."
+             if reference_ids_only else "Bind an observed record field. Runtime reads its exact typed value and derives source_id and subject from locator.record_ref. Do not supply value. Keep record_revision and field_path inside locator, without an extra record_field wrapper."),
+            _BindRecordFieldsInput if reference_ids_only else _BindRecordFieldClaimInput,
+            bind_record_fields if reference_ids_only else bind_record_field_claim,
         ),
         _function_tool(
             "compute_witness",

@@ -45,6 +45,7 @@ from .models import (
     EvidenceSourceDescriptor,
     ERPReviewContract,
     ExecutionStatus,
+    ProofNode,
     ProofPlan,
     RecordFieldLocator,
     RegisteredActionContract,
@@ -96,7 +97,7 @@ PROMPT_VERSIONS = {
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v1",
     "evidence_executor": "bounded_evidence_executor_v8_applicable_evidence",
-    "evidence_verifier": "bounded_evidence_verifier_v8_global_review",
+    "evidence_verifier": "bounded_evidence_verifier_v9_source_first",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v30",
 }
@@ -223,6 +224,16 @@ class EvidenceAssessment(_RuntimeModel):
 class EvidenceVerificationBatch(_RuntimeModel):
     assessments: list[EvidenceAssessment]
     plan_issue: str = ""
+
+
+class _VerifierSourceReview(_RuntimeModel):
+    check_id: str
+    material_status: Literal["SUFFICIENT", "MISSING", "AMBIGUOUS"]
+    reason: str = Field(min_length=1)
+
+
+class _RevealCandidateInput(_RuntimeModel):
+    source_review: list[_VerifierSourceReview]
 
 
 def _expand_verified_closures(batch: EvidenceVerificationBatch, checks: Sequence[Mapping[str, Any]]) -> VerificationBatch:
@@ -1694,6 +1705,8 @@ class EvidenceCompilerRuntime:
             "sources": sources,
             "policy": policy_excerpt,
         }
+        source_review: list[dict[str, Any]] = []
+        verifier_tools = []
         if evidence_lane:
             payload["review_objective"] = plan.objective
             payload["review_plan"] = {
@@ -1716,12 +1729,43 @@ class EvidenceCompilerRuntime:
             }.values())
             upstream_ids = {item for key in requested_check_ids for item in _transitive_upstream_check_ids(plan, key)}
             payload["upstream_evidence"] = _submitted_proof_terms(sandbox, check_ids=upstream_ids)
+            candidate = {key: payload.pop(key) for key in (
+                "upstream_evidence", "upstream_frontier_results", "repair_feedback",
+            )}
+            candidate["checks"] = [
+                {key: value for key, value in check.items() if key == "id" or key not in ProofNode.model_fields}
+                for check in checks
+            ]
+            payload["checks"] = [node.model_dump(mode="json") for node in focused_nodes]
+
+            async def reveal_candidate(_context: Any, raw: str) -> str:
+                request = _RevealCandidateInput.model_validate_json(raw)
+                ids = [item.check_id for item in request.source_review]
+                if (len(ids) != len(set(ids)) or set(ids) != target_check_ids
+                        or any(not item.reason.strip() for item in request.source_review)):
+                    return _tool_json({"ok": False, "error": "Review every focused CHECK exactly once with a nonempty source-based reason before revealing the candidate."})
+                if not source_review:
+                    source_review.extend(item.model_dump(mode="json") for item in request.source_review)
+                    self._progress(
+                        "verifier_source_review", stage="fine_verifier", status="candidate_revealed",
+                        action="Verifier 已记录原文判断，开始核查候选证明",
+                        public_reason="初步材料判断先于候选揭示冻结；它不是最终证明或标准答案。",
+                        source_review=copy.deepcopy(source_review),
+                    )
+                # A transport retry may repeat the reveal; retain the first review.
+                return _tool_json({"ok": True, "source_review": source_review, "candidate": candidate})
+
+            verifier_tools = [_function_tool(
+                "reveal_candidate", "Record a source-only material review for each focused CHECK, then reveal the Executor candidate. The first review is retained on repeated calls.",
+                _RevealCandidateInput, reveal_candidate,
+            )]
         batch = self._run_phase(
             name="fine_verifier",
             prompt_file=("evidence_verifier.md" if evidence_lane else "registered_verifier.md" if registered_lane else "verifier.md"),
             prompt_version_key=("evidence_verifier" if evidence_lane else "registered_verifier" if registered_lane else "verifier"),
             payload=payload,
             output_type=EvidenceVerificationBatch if evidence_lane else VerificationBatch,
+            tools=verifier_tools,
             max_turns=None if evidence_lane else 1,
             max_output_tokens=None,
             model_budget=model_budget,
@@ -1731,6 +1775,8 @@ class EvidenceCompilerRuntime:
                 raise CompilerSupervisionPause({
                     "status": "plan_review_required", "message": batch.plan_issue,
                 })
+            if not source_review:
+                raise ModelBehaviorError("Verifier ended without a source review and candidate inspection")
             batch = _expand_verified_closures(batch, checks)
         expected = {item["id"] for item in checks}
         actual = [item.check_id for item in batch.assessments]

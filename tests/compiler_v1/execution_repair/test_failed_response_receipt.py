@@ -27,9 +27,11 @@ def test_evidence_verifier_uses_configured_reasoning_effort(monkeypatch):
             "claim_ids", "accepted_witness_ids", "source_ids", "examined_source_ids",
         }), "source_scope_reviewed": True} for item in artifact.assessments])
     monkeypatch.setattr(runtime, "_run_phase", phase)
-    runtime.verify(plan=artifact.plan, sandbox=EvidenceSandbox.from_artifact(artifact=artifact, sources=sources.values()), policy_excerpt=pack.policy, focus_check_id=artifact.plan.nodes[0].id)
+    with pytest.raises(ModelBehaviorError, match="without a source review"):
+        runtime.verify(plan=artifact.plan, sandbox=EvidenceSandbox.from_artifact(artifact=artifact, sources=sources.values()), policy_excerpt=pack.policy, focus_check_id=artifact.plan.nodes[0].id)
     assert observed[0].get("thinking_override") is None
-    assert observed[0]["max_turns"] is None and not observed[0].get("tools")
+    assert observed[0]["max_turns"] is None
+    assert [tool.name for tool in observed[0]["tools"]] == ["reveal_candidate"]
     assert observed[0]["max_output_tokens"] is None
 
 

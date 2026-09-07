@@ -13,6 +13,10 @@ which conditions apply to this scope, including alternatives and exceptions;
 recipe labels do not make every listed constraint mandatory. Look for contrary
 evidence and gaps before building support. A true subset does not establish a
 whole conjunction, even if another CHECK tests the remaining condition.
+For equality or preservation, locate each compared side independently in the
+admitted sources. A property absent from a captured record is unknown, not false,
+null, zero or unchanged. If a required side is absent, submit the exact gap;
+do not expand the other side's facts into a claim about the missing side.
 Ground and submit this CHECK before expanding unrelated work. In Binding.reason,
 briefly justify each applicable condition for support, or the decisive conflict
 for refutation. Matching identities and successful tools alone do not establish
@@ -64,9 +68,10 @@ evidence. Intermediate calculations may feed these operands. Do not replace a
 policy limit with the amount itself, reverse operands, or change the comparison.
 The independent Verifier must link this comparison to the sealed true_status.
 When numeric_decision.steps is present, the exact program is already planned.
-Use the one target source with numeric_decision.record_model and the listed
-RECORD_FIELD JSON pointers. Bind each observed field once and reuse its Claim.
-Execute steps in order with compute_witness; STEP references name earlier steps.
+Call compute_planned_witnesses once with check_id; it reads the exact target
+fields and runs every sealed step. Do not bind those operands or copy the step
+program yourself. Review its observed fields and results, compare proposal_fields,
+and use its terminal_witness_id in your own Binding. Batch independent CHECKs.
 Do not substitute an easier field, another target, a quote or a different formula.
 proposal_fields fixes which observed fields must match the sealed proposal.
 Missing fields, an unknown invoice mode or an unavailable native tax result

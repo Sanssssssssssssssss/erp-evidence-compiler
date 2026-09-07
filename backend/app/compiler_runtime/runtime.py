@@ -96,8 +96,8 @@ PROMPT_VERSIONS = {
     "executor": "typed_evidence_executor_v31",
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v2_tool_submission",
-    "evidence_executor": "bounded_evidence_executor_v9_field_batch",
-    "evidence_verifier": "bounded_evidence_verifier_v11_tool_submission",
+    "evidence_executor": "bounded_evidence_executor_v10_planned_calculation",
+    "evidence_verifier": "bounded_evidence_verifier_v12_observed_comparisons",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v31_tool_submission",
 }
@@ -122,6 +122,7 @@ _TRACE_METADATA = {
         "bind_record_field_claim",
         "bind_record_fields",
         "compute_witness",
+        "compute_planned_witnesses",
         "submit_check",
     ],
     "side_effects": "none",
@@ -1352,6 +1353,7 @@ class EvidenceCompilerRuntime:
                         allowed_source_ids=allowed_source_ids,
                         record_fields_only=registered_lane and not evidence_lane,
                         reference_ids_only=evidence_lane,
+                        numeric_checks=focused_nodes if evidence_lane else (),
                         resolver_only=erp_resolver_lane,
                         execution_program=(
                             payload.get("execution_program")
@@ -1360,6 +1362,7 @@ class EvidenceCompilerRuntime:
                         ),
                     ),
                     max_turns=None if evidence_lane else EXECUTOR_MAX_TURNS,
+                    thinking_override="low" if evidence_lane else None,
                     max_output_tokens=None,
                     tool_use_behavior=_completion_hook(
                         sandbox,
@@ -4290,10 +4293,15 @@ def _sandbox_tools(
     reference_ids_only: bool = False,
     resolver_only: bool = False,
     execution_program: Mapping[str, Any] | None = None,
+    numeric_checks: Sequence[ProofNode] = (),
 ) -> list[FunctionTool]:
     compute_input = _ComputeWitnessIdsInput if reference_ids_only else _ComputeWitnessInput
     submit_input = _SubmitEvidenceCheckInput if reference_ids_only else _SubmitCheckInput
     strict_steps = list((execution_program or {}).get("steps") or [])
+    planned_checks = {node.id: node for node in numeric_checks
+                      if isinstance(node.action_contract, ERPReviewContract)
+                      and node.action_contract.numeric_decision
+                      and node.action_contract.numeric_decision.steps}
     strict_state: dict[str, Any] = {
         "step": 0,
         "phase": "run",
@@ -4398,6 +4406,52 @@ def _sandbox_tools(
             "compute_witness",
             lambda: sandbox.compute_witness(**data.model_dump()),
         )
+
+    async def compute_planned_witnesses(_context: Any, raw: str) -> str:
+        data = _RunRegisteredCheckInput.model_validate_json(raw)
+
+        def invoke() -> dict[str, Any]:
+            node = planned_checks.get(data.check_id)
+            if node is None:
+                return program_violation("compute_planned_witnesses", "This focused CHECK has no sealed numeric steps.")
+            contract, fields, steps = node.action_contract, {}, {}
+            program = contract.numeric_decision
+            sources = [source for source in sandbox.source_records
+                       if source.source_id in contract.target_record_refs and source.source_id in contract.source_refs
+                       and source.record_model == program.record_model]
+            if len(sources) != 1 or len(node.facet_refs) != 1:
+                return program_violation("compute_planned_witnesses", "The sealed calculation requires one admitted target and facet.")
+            source = sources[0]
+            revisions = {record.record_revision for record in contract.proposal_records if record.record_ref == source.source_id}
+            if revisions != {source.record_revision}:
+                return program_violation("compute_planned_witnesses", "The source revision must match the sealed target revision.")
+            error = source_scope_failure("compute_planned_witnesses", source.source_id)
+            if error:
+                return error
+            for step in program.steps:
+                for operand in step.operands:
+                    if operand.kind != "RECORD_FIELD" or operand.ref_id in fields:
+                        continue
+                    bound = sandbox.bind_record_field_claim(
+                        source_id=source.source_id, subject=source.source_id, predicate=operand.ref_id,
+                        locator={"record_ref": source.source_id, "record_revision": source.record_revision,
+                                 "field_path": operand.ref_id},
+                    )
+                    if not bound["ok"]:
+                        return bound
+                    fields[operand.ref_id] = {key: bound["claim"][key] for key in ("id", "value")}
+                calculated = sandbox.compute_witness(
+                    check_id=node.id, facet_ref=node.facet_refs[0], operation=step.operation,
+                    refs=[(steps if operand.kind == "STEP" else fields)[operand.ref_id]["id"]
+                          for operand in step.operands],
+                )
+                if not calculated["ok"]:
+                    return calculated
+                steps[step.step_id] = {key: calculated["witness"][key] for key in ("id", "result")}
+            return {"ok": True, "fields": fields, "steps": steps,
+                    "terminal_witness_id": steps[program.steps[-1].step_id]["id"]}
+
+        return _observed_tool("compute_planned_witnesses", invoke)
 
     async def run_registered_check(_context: Any, raw: str) -> str:
         data = _RunRegisteredCheckInput.model_validate_json(raw)
@@ -4620,6 +4674,11 @@ def _sandbox_tools(
             submit_check,
         ),
     ]
+    if reference_ids_only and planned_checks and not resolver_only:
+        tools.append(_function_tool(
+            "compute_planned_witnesses", "Read the sealed numeric CHECK's exact target fields and run all its planned arithmetic through the existing calculator. Supply only check_id. Returns observed fields and witness IDs, never a business verdict or submission. Missing fields remain errors; no values are invented.",
+            _RunRegisteredCheckInput, compute_planned_witnesses,
+        ))
     if resolver_only:
         return [
             tool

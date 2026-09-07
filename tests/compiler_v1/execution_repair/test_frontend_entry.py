@@ -133,7 +133,7 @@ def test_original_review_scope_reaches_both_execution_phases(monkeypatch, stage)
             runtime.verify(**common)
     call = observed[0]
     assert call["payload"]["review_objective"] == request["task_objective"]
-    assert call["name"] == stage and call.get("thinking_override") is None
+    assert call["name"] == stage and call.get("thinking_override") == ("low" if stage == "executor" else None)
     assert (call["max_turns"], call["max_output_tokens"]) == (None, None)
 
 

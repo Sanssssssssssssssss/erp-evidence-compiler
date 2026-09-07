@@ -48,6 +48,10 @@ LIVE_ODOO accepts an admitted native snapshot with source record provenance.
 Review its identity, revision and fields within this frozen review; require newer
 evidence only if the CHECK/policy demands freshness it cannot establish.
 Missing necessary material is NOT_FOUND with a precise missing_fact.
+For equality or preservation, independently locate both compared sides in the
+original sources. An omitted record property is unknown, not false, null, zero
+or unchanged. A candidate's assertion about that missing side is not evidence;
+reject its strong Binding and name the missing side instead of endorsing it.
 Recipe fact names do not create business policy. An absent rule that the original
 policy never requires is not missing evidence for an applicable rule.
 Documents outside the relevant subject, revision, period or purpose may leave the

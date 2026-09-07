@@ -244,7 +244,7 @@ def test_full_catalog_and_sources_reach_router_without_changing_the_plan():
     runtime = SimpleNamespace(compile_review_route=phase, requirement_pack=EVIDENCE_ACTION_REVIEW_PACK)
     plan, _, _ = compile_review(runtime, manager_request=request, sources=sources, catalog=catalog)
     view = calls[0]["payload"]["registered_review_catalog"]
-    assert len(view["templates"]) == 8
+    assert len(view["templates"]) == 2 + len(full_catalog["templates"])
     assert view == {key: catalog[key] for key in ("templates", "shared_nodes")}
     assert {item["source_id"]: item["content"] for item in calls[0]["payload"]["sources"]} == {
         item.source_id: item.record.content for item in sources

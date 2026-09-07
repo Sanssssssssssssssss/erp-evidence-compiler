@@ -25,7 +25,7 @@ def _manifest() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"sources": payload}
 
 
-def _resolve_sources(source_refs: list[str]) -> list[dict[str, Any]]:
+def _resolve_sources(source_refs: list[str], *, tax_receipt_dir: Path | None = None) -> list[dict[str, Any]]:
     items = _manifest().get("sources")
     if not isinstance(items, list):
         raise ValueError("Source manifest must be a list or contain a sources list")
@@ -55,6 +55,9 @@ def _resolve_sources(source_refs: list[str]) -> list[dict[str, Any]]:
             }
         )
         resolved.append(source)
+    if tax_receipt_dir is not None:
+        from erp_agent_odoo.tax_invoice import collect_tax_invoice_sources
+        return collect_tax_invoice_sources(resolved, tax_receipt_dir)
     return resolved
 
 
@@ -530,7 +533,7 @@ def setup(tau: Any) -> None:
                 "requirement_pack_version": pack.version,
                 "requirement_pack_hash": pack.content_hash,
                 "active_requirement_ids": active_requirement_ids,
-                "sources": _resolve_sources(source_refs),
+                "sources": _resolve_sources(source_refs, tax_receipt_dir=directory / "tax-verifications"),
                 "catalog": load_proof_catalog(os.getenv("ERP_COMPILER_REVIEW_CATALOG") or None),
                 "policy_excerpt": pack.policy_excerpt_for(active_requirement_ids),
                 "requirement_requiredness": {"erp_action_plan_valid": True},

@@ -23,6 +23,8 @@ The current child-run is frozen as an experimental integration boundary:
 
 It is not yet wired into a product Manager or an Odoo write gate.
 
+Optional experiment: [Chinese tax-invoice review with Alibaba Cloud](docs/TAX_INVOICE_EXPERIMENT.md).
+
 ## Public Agent interface
 
 The parent Agent starts a review with only:

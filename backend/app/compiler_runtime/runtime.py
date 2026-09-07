@@ -96,7 +96,7 @@ PROMPT_VERSIONS = {
     "executor": "typed_evidence_executor_v31",
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v2_tool_submission",
-    "evidence_executor": "bounded_evidence_executor_v10_planned_calculation",
+    "evidence_executor": "bounded_evidence_executor_v11_tax_invoice",
     "evidence_verifier": "bounded_evidence_verifier_v12_observed_comparisons",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v31_tool_submission",
@@ -123,6 +123,7 @@ _TRACE_METADATA = {
         "bind_record_fields",
         "compute_witness",
         "compute_planned_witnesses",
+        "verify_tax_invoice",
         "submit_check",
     ],
     "side_effects": "none",
@@ -4679,6 +4680,29 @@ def _sandbox_tools(
             "compute_planned_witnesses", "Read the sealed numeric CHECK's exact target fields and run all its planned arithmetic through the existing calculator. Supply only check_id. Returns observed fields and witness IDs, never a business verdict or submission. Missing fields remain errors; no values are invented.",
             _RunRegisteredCheckInput, compute_planned_witnesses,
         ))
+    if reference_ids_only and not resolver_only:
+        from erp_agent_odoo.tax_invoice import TEMPLATE_ID, compare_tax_invoice
+        tax_checks = {node.id: node for node in numeric_checks
+                      if isinstance(node.action_contract, ERPReviewContract) and node.action_contract.template_id == TEMPLATE_ID}
+        if tax_checks:
+            async def verify_tax_invoice(_context: Any, raw: str) -> str:
+                data = _RunRegisteredCheckInput.model_validate_json(raw)
+                def invoke() -> dict[str, Any]:
+                    node = tax_checks.get(data.check_id)
+                    if node is None:
+                        return program_violation("verify_tax_invoice", "Use a focused tax-invoice CHECK.")
+                    allowed = set(node.action_contract.source_refs)
+                    if allowed_source_ids is not None:
+                        allowed.intersection_update(allowed_source_ids)
+                    try:
+                        return compare_tax_invoice(sandbox, node, allowed)
+                    except ValueError as exc:
+                        return {"ok": False, "error": {"code": "TAX_INVOICE_EVIDENCE_GAP", "message": str(exc)}}
+                return _observed_tool("verify_tax_invoice", invoke)
+            tools.append(_function_tool(
+                "verify_tax_invoice", "For a tax-invoice CHECK, bind the exact invoice and captured Alibaba Cloud receipt fields, compare them, and return Claim/Witness references. The API observation was captured before plan sealing. No network call, verdict or submission is made here; documentation samples cannot establish live verification.",
+                _RunRegisteredCheckInput, verify_tax_invoice,
+            ))
     if resolver_only:
         return [
             tool

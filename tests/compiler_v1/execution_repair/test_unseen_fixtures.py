@@ -13,6 +13,7 @@ from app.compiler_runtime.models import ReviewArtifact, CompiledProof
 from app.compiler_runtime.requirement_pack import EVIDENCE_ACTION_REVIEW_PACK
 from app.compiler_runtime.runtime import _validate_registered_proof_plan, policy_excerpt_for, CompilerRunCheckpoint, prepared_sources_from_checkpoint
 from erp_agent_odoo.evidence_review import ReviewRouting, compile_review
+from erp_agent_odoo.capabilities.proof_dag import load_proof_catalog
 
 
 @pytest.mark.parametrize("name", ["material-a", "material-b", "material-c", "material-d"])
@@ -20,7 +21,7 @@ def test_unseen_fixture_retains_sources_catalog_and_generic_execution(name):
     path = Path(__file__).parent / "unseen_cases" / f"{name}.json"
     request, sources, catalog = load_fixture(path)
     expected = json.loads(path.with_suffix(".expected.json").read_text(encoding="utf-8"))
-    assert len(catalog["templates"]) == 10 and len(sources) == 5
+    assert len(catalog["templates"]) == len(load_proof_catalog()["templates"]) + 4 and len(sources) == 5
     assert set(request["source_refs"]) == {source.source_id for source in sources}
     assert "pack_id" not in request and "expected" not in request
     assert all(source.source_fingerprint == hashlib.sha256(source.record.content.encode()).hexdigest() for source in sources)

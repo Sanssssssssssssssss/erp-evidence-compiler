@@ -24,4 +24,6 @@
 
 这些是不同阶段的结果，不能相加成整体节省率。
 
+2026-09-07 新税票工具实验：官方脱敏示例跑一个真实模型 child，规划 **1.445万**、Executor low **2.845万**、Verifier high **2.131万**，共 **6.421万 token**；2/2 正确保持证据不足，Kernel 重放一致。此例更小且没有真实阿里云查询，不与旧 ERP 发票案例计算节省率。详见[税票实验](TAX_INVOICE_EXPERIMENT.md)。
+
 [详细账目保留在旧版日志](https://github.com/Sanssssssssssssssss/erp-evidence-compiler/blob/4336338bda40559ea9b655cc87eece8b016c5609/docs/COMPILER_TOKEN_OPTIMIZATION_LEDGER.md)。

@@ -13,6 +13,20 @@
     "model_fallback": "only for admitted but genuinely semantic evidence"
   },
   "proof_recipes": {
+    "tax_invoice_registry_verified": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["required registry verification and freshness"]},
+        {"group_id": "receipt", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["live provider observation bound to exact invoice fingerprint", "query identity", "verification_state", "invalid_mark", "observed_at", "raw_response_sha256"]}
+      ]
+    },
+    "tax_invoice_fields_match_receipt": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["required field comparisons"]},
+        {"group_id": "invoice_and_receipt", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["independent original invoice and captured provider fields", "invoice identity", "buyer and seller", "amounts and tax"]}
+      ]
+    },
     "acceptance_budget_covers_list": {
       "resolver": "deterministic_arithmetic",
       "requires_calculation": true,
@@ -430,6 +444,19 @@
     }
   ],
   "templates": [
+    {
+      "id": "cn_tax_invoice_review.v1",
+      "executor_status": "active",
+      "protects": ["cn.tax_invoice.review"],
+      "applicable_stages": ["verify"],
+      "required_payload_fields": ["invoice_source_id"],
+      "decision": "ALL_APPLICABLE",
+      "checks": [
+        {"id": "tax_invoice_registry_verified", "resolver": "semantic_evidence", "observation": "The admitted policy's registry verification requirement is met by a live Alibaba Cloud response for this exact invoice snapshot and query, with sufficient identity, status and freshness. A service success code alone is insufficient. Official blank forms and provider documentation examples describe formats, not issued invoices. DOCUMENTATION_ONLY, missing credentials, unsupported types, lookup misses, masked identity and transport errors cannot prove authenticity or inauthenticity. Apply any invalidation/red-letter restriction only as stated in the policy. This review does not authorize payment or establish delivery."},
+        {"id": "tax_invoice_fields_match_receipt", "resolver": "semantic_evidence", "observation": "The original invoice matches the independently obtained provider receipt on the identity and fields required by the admitted policy. Call verify_tax_invoice for both observed sides and numeric comparison witnesses. Preserve missing or masked required fields as unknown. An illustration copied from the provider response is not independent original-invoice evidence. Apply the policy's comparison tolerance; exact equality is only a tool observation, not a new policy. Official form layouts are format references, not evidence of a particular transaction."}
+      ],
+      "requires_shared": []
+    },
     {
       "id": "sales_order_disposition.v1",
       "applies_when": "Use when the admitted policy authorizes accepting some customer requests and rejecting, cancelling or excluding others according to eligibility conditions. Apply to both confirmations and cancellations in that screening workflow, even if the proposed decision is wrong. Budget caps, quantities and deadlines alone do not establish a screening workflow: constraints on fulfilling every order belong to sales_order_release.v1. Neither a Manager stage label nor a suspected violation supplies missing authority to reject orders.",

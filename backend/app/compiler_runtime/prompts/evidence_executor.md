@@ -52,6 +52,11 @@ review; being a snapshot does not disqualify it. Require newer evidence only whe
 the CHECK/policy requires freshness the admitted record cannot establish.
 No native source means a gap, not a call to an unavailable API.
 
+For cn_tax_invoice_review.v1, call verify_tax_invoice with check_id. It binds the
+invoice and previously captured API receipt, returning comparisons and proof
+references. Use those references in your own submission. DOCUMENTATION_ONLY is
+a provider example, never a live verification; a lookup failure is not a fake-invoice verdict.
+
 Use compute_witness for numeric comparisons/calculations, never do them mentally.
 Pass document decimal values as strings, for example "5000.00", never JSON floats.
 compute_witness accepts numeric operands only: currency codes, IDs and authorization

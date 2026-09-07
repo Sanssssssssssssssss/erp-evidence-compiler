@@ -97,7 +97,7 @@ PROMPT_VERSIONS = {
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v1",
     "evidence_executor": "bounded_evidence_executor_v8_applicable_evidence",
-    "evidence_verifier": "bounded_evidence_verifier_v9_source_first",
+    "evidence_verifier": "bounded_evidence_verifier_v10_shared_context",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v30",
 }
@@ -1736,7 +1736,26 @@ class EvidenceCompilerRuntime:
                 {key: value for key, value in check.items() if key == "id" or key not in ProofNode.model_fields}
                 for check in checks
             ]
+            candidate["proof_terms"] = {}
+            for kind, fields in (
+                ("claims", ("candidate_claims",)),
+                ("bindings", ("candidate_binding_proposals",)),
+                ("witnesses", ("candidate_calculation_witnesses", "candidate_resolver_witnesses")),
+            ):
+                terms = candidate["upstream_evidence"].pop(kind)
+                for check in candidate["checks"]:
+                    for field in fields:
+                        terms.extend(check.pop(field))
+                candidate["proof_terms"][kind] = list({term["id"]: term for term in terms}.values())
             payload["checks"] = [node.model_dump(mode="json") for node in focused_nodes]
+            if len(focused_nodes) > 1:
+                contracts = [check["action_contract"] for check in payload["checks"]]
+                shared = {key: value for key, value in contracts[0].items()
+                          if all(key in contract and contract[key] == value for contract in contracts)}
+                payload["shared_action_contract"] = shared
+                for check in payload["checks"]:
+                    check["action_contract"] = {key: value for key, value in check["action_contract"].items()
+                                                if key not in shared}
 
             async def reveal_candidate(_context: Any, raw: str) -> str:
                 request = _RevealCandidateInput.model_validate_json(raw)

@@ -22,6 +22,41 @@ def routing():
     )
 
 
+@pytest.mark.parametrize("omit_submission", [False, True])
+def test_note_only_batch_reaches_verifier_but_unsubmitted_check_does_not(monkeypatch, omit_submission):
+    import asyncio
+    import json
+    from app.compiler_runtime.runtime import ExecutorSummary
+    request, sources, catalog = control()
+    runtime = EvidenceCompilerRuntime(SimpleNamespace(settings=SimpleNamespace(llm_model="offline")),
+        requirement_pack=EVIDENCE_ACTION_REVIEW_PACK)
+    monkeypatch.setattr(runtime, "_run_phase", lambda **_: routing())
+    plan, proposal, _ = compile_review(runtime, manager_request=request, sources=sources, catalog=catalog)
+    checks = [node.id for node in plan.nodes if node.kind == "CHECK"]
+    reached = []
+    class ReachedVerifier(RuntimeError):
+        pass
+    def phase(**kwargs):
+        if kwargs["name"] == "fine_verifier":
+            reached.append(True)
+            raise ReachedVerifier()
+        tool = next(item for item in kwargs["tools"] if item.name == "submit_check")
+        for check_id in checks[1:] if omit_submission else checks:
+            response = json.loads(asyncio.run(tool.on_invoke_tool(None, json.dumps(dict(check_id=check_id, note="Authorization evidence is missing.")))))
+            assert response["ok"], response
+        return ExecutorSummary(completed_check_ids=[], unresolved_check_ids=checks)
+    monkeypatch.setattr(runtime, "_run_phase", phase)
+    kwargs = dict(active_requirement_ids=["erp_action_plan_valid"], prepared_sources=sources,
+        action_proposal=proposal, proof_plan=plan, compiler_run_id="note-only")
+    if omit_submission:
+        result = runtime.run(**kwargs)
+        assert result.compile_status == "NON_CONVERGED" and not reached
+    else:
+        with pytest.raises(ReachedVerifier):
+            runtime.run(**kwargs)
+        assert reached == [True]
+
+
 def test_entry_exposes_original_materials_and_seals_executable_plan():
     request, sources, catalog = control()
     calls = []
@@ -46,7 +81,14 @@ def test_entry_exposes_original_materials_and_seals_executable_plan():
     assert answer["routing"]["selected_template_ids"] == ["treasury_controls.v1", "stock_disposal.v1"]
     sandbox = _initial_sandbox(plan=plan, prepared_sources=sources, policy_excerpt=EVIDENCE_ACTION_REVIEW_PACK.policy)
     nodes = [node for node in plan.nodes if node.kind == "CHECK"]
+    amount_contract = next(node.action_contract for node in nodes if node.action_contract.local_check_id == "amount_limit")
+    assert amount_contract.numeric_decision.model_dump() == catalog["proof_recipes"]["amount_limit"]["numeric_decision"]
+    changed = amount_contract.model_dump(mode="json")
+    changed["numeric_decision"]["true_status"] = "CONTRADICTED"
+    with pytest.raises(ValueError, match="hash"):
+        type(amount_contract).model_validate(changed)
     payload = _evidence_execution_payload(nodes, sandbox, [node.id for node in nodes])
+    assert any(item["numeric_decision"] == amount_contract.numeric_decision.model_dump() for item in payload["checks"])
     assert {item["source_id"]: item["content"] for item in payload["sources"]} == {item.source_id: item.record.content for item in sources}
     assert set(sandbox.read_source_ids) == {item.source_id for item in sources}
     assert next(item for item in payload["sources"] if item["source_id"] == "payment:q7")["record_fields"]["amount"] == 4000

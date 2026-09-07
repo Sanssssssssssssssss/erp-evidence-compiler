@@ -23,7 +23,9 @@ def test_evidence_verifier_uses_configured_reasoning_effort(monkeypatch):
     observed = []
     def phase(**kwargs):
         observed.append(kwargs)
-        return SimpleNamespace(assessments=artifact.assessments)
+        return kwargs["output_type"](assessments=[{**item.model_dump(exclude={
+            "claim_ids", "accepted_witness_ids", "source_ids", "examined_source_ids",
+        }), "source_scope_reviewed": True} for item in artifact.assessments])
     monkeypatch.setattr(runtime, "_run_phase", phase)
     runtime.verify(plan=artifact.plan, sandbox=EvidenceSandbox.from_artifact(artifact=artifact, sources=sources.values()), policy_excerpt=pack.policy, focus_check_id=artifact.plan.nodes[0].id)
     assert observed[0].get("thinking_override") is None
@@ -178,7 +180,7 @@ def test_parse_failure_keeps_pre_parse_response_in_both_transport_modes(monkeypa
             max_turns=1, result_sink=captured.append,
             tools=[offline_marker] if with_tools else [],
         )
-    assert routes == ["stream" if with_tools else "nonstream"]
+    assert routes == ["stream"]
     assert closed == [True]
     assert captured == [raised.value.run_data]
     assert captured[0].raw_responses == [response]
@@ -187,3 +189,11 @@ def test_parse_failure_keeps_pre_parse_response_in_both_transport_modes(monkeypa
     assert record.transport_attempt == record.provider_turn_count == 1
     assert record.usage == {"prompt_tokens": 51, "completion_tokens": 9, "total_tokens": 60}
     assert record.reasoning_full == "Completed reasoning before truncated JSON."
+
+
+def test_error_chain_keeps_underlying_os_reason_without_secrets():
+    from app.runtime.retry import error_chain
+    cause = OSError(11001, "private request URL must not be logged")
+    failure = RuntimeError("outer wrapper")
+    failure.__cause__ = cause
+    assert error_chain(failure) == [{"type": "RuntimeError"}, {"type": "OSError", "errno": 11001}]

@@ -17,8 +17,9 @@ _EVIDENCE_SOURCES = {
 }
 
 
-def load_proof_catalog() -> dict[str, Any]:
-    return json.loads(Path(__file__).with_name("proof_templates.json").read_text(encoding="utf-8"))
+def load_proof_catalog(catalog_path: str | Path | None = None) -> dict[str, Any]:
+    path = Path(catalog_path) if catalog_path else Path(__file__).with_name("proof_templates.json")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _compile_check(check: Mapping[str, Any], catalog: Mapping[str, Any]) -> dict[str, Any]:
@@ -59,6 +60,7 @@ def _compile_check(check: Mapping[str, Any], catalog: Mapping[str, Any]) -> dict
         "execution": {
             "mode": recipe.get("execution_mode", "evidence_review"),
             "requires_calculation": recipe.get("requires_calculation", check["resolver"] == "deterministic_arithmetic"),
+            **({"numeric_decision": recipe["numeric_decision"]} if recipe.get("numeric_decision") is not None else {}),
             "tool": "read_source" if recipe.get("execution_mode", "evidence_review") == "evidence_review" else "run_registered_check",
             "operation": str(check["resolver"]),
             "evidence": [dict(item) for item in evidence],
@@ -521,6 +523,7 @@ def lower_erp_stage_to_proof_plan(
     revision: int = 1,
     completed_action_ids: set[str] | frozenset[str] = frozenset(),
     source_fingerprints: Mapping[str, str] | None = None,
+    source_records: Mapping[str, Any] | None = None,
 ) -> Any:
     """Retain the active ERP DAG frontier as typed CHECK nodes in ``ProofPlan``."""
 
@@ -610,6 +613,7 @@ def lower_erp_stage_to_proof_plan(
     )
 
     specs: list[dict[str, Any]] = []
+    numeric_groups: dict[tuple[str, str], list[str]] = {}
     logical_ids_by_node: dict[str, list[str]] = {}
     for node_id in [str(node["id"]) for node in executor_plan["nodes"] if str(node["id"]) in needed_nodes]:
         node = nodes_by_id[node_id]
@@ -654,9 +658,28 @@ def lower_erp_stage_to_proof_plan(
             source_refs = [str(item) for item in node.get("source_ids") or []]
 
         logical_ids = []
+        entries = []
         for check in checks:
+            decision = check["execution"].get("numeric_decision")
+            for record in records if decision and decision.get("steps") else [None]:
+                source = (source_records or {}).get(record.record_ref) if record and record.record_ref in source_refs else None
+                fields = source.record_fields if source and source.record_model == decision["record_model"] else {}
+                condition = check.get("enabled_field")
+                if condition and fields and fields.get(condition) is False:
+                    continue
+                mode = check.get("invoice_mode")
+                if mode and fields and fields.get("mode") in {"fixed_amount", "percentage"} and fields["mode"] != mode:
+                    continue
+                entries.append((check, record))
+        for check, record in entries:
             local_check_id = str(check["id"])
             logical_id = f"{owner_action_id}:{template_id}:{local_check_id}"
+            decision = check["execution"].get("numeric_decision")
+            if record is not None:
+                logical_id += f":{record.record_ref}"
+            if check.get("numeric_group") == "eligibility":
+                decision = {**decision, "true_status": "CONTRADICTED" if action_kind == "sale.order.action_cancel" else "SUPPORTED"}
+                numeric_groups.setdefault((owner_action_id, record.record_ref), []).append(logical_id)
             logical_ids.append(logical_id)
             specs.append(
                 {
@@ -667,13 +690,14 @@ def lower_erp_stage_to_proof_plan(
                     "stage": stage,
                     "check_kind": check_kind,
                     "action_kind": action_kind,
-                    "target_record_refs": targets,
-                    "proposal_records": records,
+                    "target_record_refs": [record.record_ref] if record is not None else targets,
+                    "proposal_records": [record] if record is not None else records,
                     "source_refs": source_refs,
                     "resolver_id": str(check["resolver"]),
                     "resolver_evidence": list(check["execution"]["evidence"]),
                     "execution_mode": check["execution"].get("mode", "registered_resolver"),
                     "requires_calculation": check["execution"].get("requires_calculation", False),
+                    "numeric_decision": decision,
                     "statement": str(check["observation"]),
                     "upstream_node_ids": sorted(incoming.get(node_id, set()) & needed_nodes),
                 }
@@ -760,12 +784,25 @@ def lower_erp_stage_to_proof_plan(
     ]
     if not checks:
         raise ValueError("ERP stage produced no executable CHECKs")
-    root_id = checks[0].id
     plan_nodes: list[Any] = list(checks)
-    if len(checks) > 1:
+    grouped_ids = set()
+    for (owner, target), logical_ids in numeric_groups.items():
+        ids = [instance_by_logical[item] for item in logical_ids]
+        action_kind = next(record.action_kind for record in proposal_records if record.action_id == owner)
+        plan_nodes.append(ProofNode(id=f"eligibility:r{revision}:{owner}:{target}",
+            kind="ANY" if action_kind == "sale.order.action_cancel" else "ALL", depends_on=ids))
+        grouped_ids.update(ids)
+    # An explicit all-disabled screening policy cannot become an empty positive gate.
+    for node in actions:
+        if any(check.get("numeric_group") == "eligibility" for check in node["checks"]) and node["id"] in active_actions:
+            if any((node["id"], record.record_ref) not in numeric_groups for record in records_by_action[node["id"]]):
+                raise ValueError("Screening requires at least one registered active eligibility predicate")
+    roots = [node.id for node in plan_nodes if node.id not in grouped_ids]
+    root_id = roots[0]
+    if len(roots) > 1:
         root_id = f"all:erp-stage:r{revision}:{bindings['proposal_hash'][:16]}"
         plan_nodes.append(
-            ProofNode(id=root_id, kind="ALL", depends_on=[check.id for check in checks])
+            ProofNode(id=root_id, kind="ALL", depends_on=roots)
         )
     return ProofPlan(
         plan_id=f"plan:erp-stage:r{revision}:{bindings['proposal_hash'][:16]}",

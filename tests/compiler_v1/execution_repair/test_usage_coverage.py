@@ -6,6 +6,7 @@ from agents.usage import Usage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from app.runtime.context_partition import usage_from_result
+from app.observability.model_metrics import summarize_compiler_stages
 
 
 def result(*usages):
@@ -22,6 +23,31 @@ def test_explicit_sdk_zero_is_retained():
         "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
         "cached_tokens": 0, "reasoning_tokens": 0,
     }
+
+
+def test_phase_receipt_keeps_failed_attempts_unknown_usage_and_real_zero():
+    calls = [
+        {"role": "executor", "logical_invocation_id": "e1", "usage": None, "error": "timeout", "provider_turn_count": 0},
+        {"role": "executor", "logical_invocation_id": "e1", "usage": {
+            "prompt_tokens": 10, "cached_tokens": 0, "completion_tokens": 2, "reasoning_tokens": 0, "total_tokens": 12,
+        }, "provider_turn_count": 2},
+        {"role": "fine_verifier", "logical_invocation_id": "v1", "usage": {
+            "prompt_tokens": 0, "cached_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0, "total_tokens": 0,
+        }, "provider_turn_count": 1},
+    ]
+    stages = summarize_compiler_stages(calls)
+    assert stages["executor"]["total_tokens"] is None
+    assert stages["executor"]["known_token_lower_bound"]["total_tokens"] == 12
+    assert stages["executor"]["logical_calls"] == 1 and stages["executor"]["transport_attempts"] == 2
+    assert stages["executor"]["provider_turns"] is None and stages["executor"]["failed_attempts"] == 1
+    assert stages["fine_verifier"]["total_tokens"] == stages["fine_verifier"]["reasoning_tokens"] == 0
+    calls[0] = calls[1] | {"usage": calls[1]["usage"] | {"partial_metrics": ["reasoning_tokens"]}}
+    stages = summarize_compiler_stages(calls)
+    assert stages["executor"]["total_tokens"] == 24 and stages["executor"]["reasoning_tokens"] is None
+    calls[0] = calls[1] | {"error": "stream ended after an earlier completed response"}
+    stages = summarize_compiler_stages(calls)
+    assert stages["executor"]["total_tokens"] is None and stages["executor"]["provider_turns"] is None
+    assert stages["executor"]["known_token_lower_bound"]["total_tokens"] == 24
 
 
 @pytest.mark.parametrize("usage", [None, {}, {

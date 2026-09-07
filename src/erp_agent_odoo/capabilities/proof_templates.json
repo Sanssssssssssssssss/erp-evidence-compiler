@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "execution_contract": {
     "compiler_output": "checks, dependencies, parameters, source selectors and action DAG only",
     "authorization_binding": ["proposal_hash", "source_snapshot_hash", "policy_hash"],
@@ -13,6 +13,176 @@
     "model_fallback": "only for admitted but genuinely semantic evidence"
   },
   "proof_recipes": {
+    "acceptance_budget_covers_list": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "list_total", "operation": "MULTIPLY", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/list_price"}]}, {"step_id": "within_budget", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "list_total"}, {"kind": "RECORD_FIELD", "ref_id": "/budget"}]}], "proposal_fields": {"/quantity": "quantity"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/budget", "/list_price", "/quantity"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "acceptance_quantity_minimum": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "GTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "minimum", "operation": "GTE", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/min_quantity"}]}], "proposal_fields": {"/quantity": "quantity"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/min_quantity", "/quantity"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "acceptance_quantity_maximum": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "maximum", "operation": "LTE", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/max_quantity"}]}], "proposal_fields": {"/quantity": "quantity"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/max_quantity", "/quantity"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "acceptance_minimum_lead_days": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "GTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "minimum_lead", "operation": "GTE", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/lead_days"}, {"kind": "RECORD_FIELD", "ref_id": "/min_lead_days"}]}], "proposal_fields": {"/lead_days": "commitment_days"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/lead_days", "/min_lead_days"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "proposal_scope_matches_requests": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "proposed_targets", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["confirm_targets", "cancel_targets", "create_targets"]},
+        {"group_id": "candidate_requests", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["seeded_requests", "prompt_requests"]}
+      ]
+    },
+    "sales_terms_sources_match": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "proposed_terms", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["price_unit", "amount_untaxed", "payment_term"]},
+        {"group_id": "commercial_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["list_price_rule", "budget_rule", "payment_term_rule"]},
+        {"group_id": "request_budget", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["budget", "list_price", "payment_term"]}
+      ]
+    },
+    "sales_unit_price_matches_list": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "EQUAL", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "price", "operation": "EQUAL", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/price_unit"}, {"kind": "RECORD_FIELD", "ref_id": "/list_price"}]}], "proposal_fields": {"/price_unit": "price_unit"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/list_price", "/price_unit"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "sales_untaxed_total_within_budget": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "total", "operation": "MULTIPLY", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/price_unit"}]}, {"step_id": "budget", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "total"}, {"kind": "RECORD_FIELD", "ref_id": "/budget"}]}], "proposal_fields": {"/quantity": "quantity", "/price_unit": "price_unit"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/budget", "/price_unit", "/quantity"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "purchase_quantity_minimum": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "GTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "minimum", "operation": "GTE", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/horizon_quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/min_quantity"}]}], "proposal_fields": {}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/horizon_quantity", "/min_quantity"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "purchase_quantity_maximum": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "maximum", "operation": "LTE", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/horizon_quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/max_quantity"}]}], "proposal_fields": {}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/horizon_quantity", "/max_quantity"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "purchase_quantity_vendor_cap": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "cap", "operation": "LTE", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/horizon_quantity"}, {"kind": "RECORD_FIELD", "ref_id": "/vendor_cap"}]}], "proposal_fields": {}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/horizon_quantity", "/vendor_cap"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "purchase_unit_price_matches_tier": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "EQUAL", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "tier_price", "operation": "EQUAL", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/unit_cost"}, {"kind": "RECORD_FIELD", "ref_id": "/tier_price"}]}], "proposal_fields": {"/unit_cost": "unit_cost"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/tier_price", "/unit_cost"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "invoice_regular_amount_matches_order": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "difference", "operation": "ABS_DIFF", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_untaxed"}, {"kind": "RECORD_FIELD", "ref_id": "/order_untaxed_total"}]}, {"step_id": "within_tolerance", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "difference"}, {"kind": "RECORD_FIELD", "ref_id": "/currency_tolerance"}]}], "proposal_fields": {"/amount_untaxed": "amount_untaxed"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/amount_untaxed", "/currency_tolerance", "/order_untaxed_total"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "invoice_fixed_downpayment_matches_policy": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "difference", "operation": "ABS_DIFF", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_untaxed"}, {"kind": "RECORD_FIELD", "ref_id": "/fixed_amount"}]}, {"step_id": "within_tolerance", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "difference"}, {"kind": "RECORD_FIELD", "ref_id": "/currency_tolerance"}]}], "proposal_fields": {"/amount_untaxed": "amount_untaxed"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/amount_untaxed", "/currency_tolerance", "/fixed_amount"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "invoice_percentage_downpayment_matches_policy": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "expected", "operation": "MULTIPLY", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/order_untaxed_total"}, {"kind": "RECORD_FIELD", "ref_id": "/downpayment_ratio"}]}, {"step_id": "difference", "operation": "ABS_DIFF", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_untaxed"}, {"kind": "STEP", "ref_id": "expected"}]}, {"step_id": "within_tolerance", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "difference"}, {"kind": "RECORD_FIELD", "ref_id": "/currency_tolerance"}]}], "proposal_fields": {"/amount_untaxed": "amount_untaxed"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/amount_untaxed", "/currency_tolerance", "/downpayment_ratio", "/order_untaxed_total"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "invoice_balance_matches_remaining": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "remaining", "operation": "SUBTRACT", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/order_untaxed_total"}, {"kind": "RECORD_FIELD", "ref_id": "/authorized_downpayment_amount"}]}, {"step_id": "difference", "operation": "ABS_DIFF", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_untaxed"}, {"kind": "STEP", "ref_id": "remaining"}]}, {"step_id": "within_tolerance", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "difference"}, {"kind": "RECORD_FIELD", "ref_id": "/currency_tolerance"}]}], "proposal_fields": {"/amount_untaxed": "amount_untaxed"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/amount_untaxed", "/authorized_downpayment_amount", "/currency_tolerance", "/order_untaxed_total"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]}
+      ]
+    },
+    "invoice_tax_basis_matches_policy": {
+      "resolver": "semantic_evidence",
+      "evidence": [
+        {"group_id": "proposed_tax_basis", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_lines", "tax_basis", "currency"]},
+        {"group_id": "tax_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["explicit_tax_treatment"]},
+        {"group_id": "tax_inputs", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["sale_lines", "product_taxes", "fiscal_position"]},
+        {"group_id": "odoo_tax_result", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["tax_lines", "amount_tax", "amount_total"]}
+      ]
+    },
+    "invoice_tax_amount_matches_odoo": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "difference", "operation": "ABS_DIFF", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_tax"}, {"kind": "RECORD_FIELD", "ref_id": "/odoo_amount_tax"}]}, {"step_id": "within_tolerance", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "difference"}, {"kind": "RECORD_FIELD", "ref_id": "/currency_tolerance"}]}], "proposal_fields": {}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/amount_tax", "/currency_tolerance", "/odoo_amount_tax"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]},
+        {"group_id": "native_tax_result", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["native tax result revisions and source fingerprints"]}
+      ]
+    },
+    "invoice_total_matches_untaxed_and_tax": {
+      "resolver": "deterministic_arithmetic",
+      "requires_calculation": true,
+      "numeric_decision": {"operation": "LTE", "true_status": "SUPPORTED", "record_model": "derived.erp_amount_facts", "steps": [{"step_id": "expected_total", "operation": "SUM", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_untaxed"}, {"kind": "RECORD_FIELD", "ref_id": "/odoo_amount_tax"}]}, {"step_id": "difference", "operation": "ABS_DIFF", "operands": [{"kind": "RECORD_FIELD", "ref_id": "/amount_total"}, {"kind": "STEP", "ref_id": "expected_total"}]}, {"step_id": "within_tolerance", "operation": "LTE", "operands": [{"kind": "STEP", "ref_id": "difference"}, {"kind": "RECORD_FIELD", "ref_id": "/currency_tolerance"}]}], "proposal_fields": {"/amount_untaxed": "amount_untaxed"}},
+      "evidence": [
+        {"group_id": "target_amount_fields", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "STRUCTURED", "facts": ["/amount_total", "/amount_untaxed", "/currency_tolerance", "/odoo_amount_tax"]},
+        {"group_id": "applicable_instruction", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["policy applicability and the field-source mapping"]},
+        {"group_id": "native_tax_result", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["native tax result revisions and source fingerprints"]}
+      ]
+    },
     "portfolio_plan_valid": {
       "resolver": "deterministic_supply_graph",
       "evidence": [
@@ -55,22 +225,6 @@
         {"group_id": "policy_text", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["active_predicate_ids", "predicate_parameters", "policy_scope"]}
       ]
     },
-    "acceptance_predicates_match_requested_action": {
-      "resolver": "deterministic_arithmetic",
-      "evidence": [
-        {"group_id": "proposed_order", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["action_kind", "quantity", "price_unit", "commitment_days"]},
-        {"group_id": "acceptance_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["budget_rule", "min_quantity", "max_quantity", "min_lead_days", "list_price"]},
-        {"group_id": "customer_request", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["budget", "requested_quantity", "requested_lead_days"]}
-      ]
-    },
-    "proposal_matches_policy_outcome": {
-      "resolver": "deterministic_set_comparison",
-      "evidence": [
-        {"group_id": "proposed_targets", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["confirm_targets", "cancel_targets", "create_targets"]},
-        {"group_id": "candidate_requests", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["seeded_requests", "prompt_requests"]},
-        {"group_id": "predicate_results", "source": "UPSTREAM_CHECK", "method": "UPSTREAM", "upstream_checks": ["acceptance_predicates_match_requested_action"], "facts": ["per_request_acceptance"]}
-      ]
-    },
     "confirm_payload_and_supply_are_valid": {
       "resolver": "odoo_native_transition",
       "evidence": [
@@ -96,14 +250,6 @@
         {"group_id": "native_preflight", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["record_ref", "write_date", "state", "confirmation_errors"]}
       ]
     },
-    "commercial_terms_match_policy": {
-      "resolver": "deterministic_arithmetic",
-      "evidence": [
-        {"group_id": "proposed_terms", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["price_unit", "amount_untaxed", "payment_term"]},
-        {"group_id": "commercial_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["list_price_rule", "budget_rule", "payment_term_rule"]},
-        {"group_id": "request_budget", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["budget", "list_price", "payment_term"]}
-      ]
-    },
     "commitment_is_feasible": {
       "resolver": "deterministic_date_check",
       "evidence": [
@@ -125,14 +271,6 @@
         {"group_id": "proposed_purchase", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["vendor_ref", "product_code", "route"]},
         {"group_id": "admitted_offers", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["vendor_ref", "product_code", "route", "offer_status", "disruption_status"]},
         {"group_id": "route_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["allowed_routes", "forbidden_routes"]}
-      ]
-    },
-    "quantity_and_price_match_tier": {
-      "resolver": "deterministic_arithmetic",
-      "evidence": [
-        {"group_id": "proposed_purchases", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["vendor_ref", "offer_ref", "quantity", "unit_cost"]},
-        {"group_id": "offer_tiers", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["minimum_quantity", "maximum_quantity", "price_tiers", "vendor_caps", "vendor_internal_notes"]},
-        {"group_id": "purchase_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["horizon_scope", "consolidation_rule", "tier_rule"]}
       ]
     },
     "delivery_date_is_feasible": {
@@ -231,23 +369,6 @@
         {"group_id": "live_invoice_states", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["order_invoice_refs", "invoice_roles", "states", "write_dates", "released_orders", "posted_downpayments"]}
       ]
     },
-    "invoice_amount_matches_mode_and_value": {
-      "resolver": "deterministic_arithmetic",
-      "evidence": [
-        {"group_id": "proposed_amounts", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_role", "amount_untaxed", "currency"]},
-        {"group_id": "amount_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["threshold", "mode", "value", "currency_tolerance"]},
-        {"group_id": "order_amounts", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["order_untaxed_total", "authorized_downpayment_amount"]}
-      ]
-    },
-    "invoice_taxes_match_odoo_computation": {
-      "resolver": "deterministic_arithmetic",
-      "evidence": [
-        {"group_id": "proposed_tax_basis", "source": "MANAGER_PROPOSAL", "method": "STRUCTURED", "facts": ["invoice_lines", "tax_basis", "currency"]},
-        {"group_id": "tax_policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "MODEL_QUOTE", "facts": ["explicit_tax_treatment"]},
-        {"group_id": "tax_inputs", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["sale_lines", "product_taxes", "fiscal_position"]},
-        {"group_id": "odoo_tax_result", "source": "LIVE_ODOO", "method": "RUNTIME_TOOL", "facts": ["tax_lines", "amount_tax", "amount_total"]}
-      ]
-    },
     "invoice_scope_is_exact": {
       "resolver": "deterministic_set_comparison",
       "evidence": [
@@ -318,48 +439,16 @@
       "required_payload_fields": ["state", "customer_ref", "product_code", "quantity", "price_unit", "commitment_days"],
       "decision": "ALL_APPLICABLE",
       "checks": [
-        {
-          "id": "target_is_unique_fresh_reviewable_so",
-          "applicable_stages": ["confirm", "release", "cancel"],
-          "observation": "The exact task sale.order exists once and its identity, state, write_date and relevant line fingerprint equal the admitted snapshot.",
-          "resolver": "odoo_snapshot"
-        },
-        {
-          "id": "request_identity_matches_order",
-          "applicable_stages": ["confirm", "release", "cancel"],
-          "observation": "Customer, product, quantity and task reference match the admitted task request. Price and deadline are checked separately.",
-          "resolver": "deterministic_field_match"
-        },
-        {
-          "id": "acceptance_policy_is_admitted",
-          "applicable_stages": ["confirm", "release", "cancel"],
-          "observation": "The active predicate ids and parameters come from the registered policy version, not from the action proposal.",
-          "resolver": "registered_policy"
-        },
-        {
-          "id": "acceptance_predicates_match_requested_action",
-          "applicable_stages": ["confirm", "release", "cancel"],
-          "observation": "Evaluate every predicate enabled by the registered family. Confirm requires all active predicates true; cancel/skip requires at least one active predicate false. Stable types are budget_covers_list, quantity_range and minimum_lead_days; absent predicates are not invented.",
-          "resolver": "deterministic_arithmetic"
-        },
-        {
-          "id": "proposal_matches_policy_outcome",
-          "applicable_stages": ["confirm", "release", "cancel"],
-          "observation": "For this action's target requests, the proposed action matches their reviewed eligibility: confirm passing requests, cancel failing seeded drafts, and do not create failing prompt-only requests. Whole-task coverage belongs to the shared portfolio check, not this local check.",
-          "resolver": "deterministic_set_comparison"
-        },
-        {
-          "id": "confirm_payload_and_supply_are_valid",
-          "applicable_stages": ["confirm", "release"],
-          "observation": "The draft quotation passes Odoo's native confirmation check; commercial fields and commitment date match policy; and the confirmed subset is supported by shared portfolio_plan_valid and lineage_closure_valid.",
-          "resolver": "odoo_native_transition"
-        },
-        {
-          "id": "cancel_target_is_unlocked_and_scope_exact",
-          "applicable_stages": ["cancel"],
-          "observation": "The target is not locked and cancellation includes only failing seeded task orders; supply feasibility is not a cancellation prerequisite.",
-          "resolver": "odoo_native_transition"
-        }
+        {"id": "target_is_unique_fresh_reviewable_so", "applicable_stages": ["confirm", "release", "cancel"], "observation": "The exact task sale.order exists once and its identity, state, write_date and relevant line fingerprint equal the admitted snapshot.", "resolver": "odoo_snapshot"},
+        {"id": "request_identity_matches_order", "applicable_stages": ["confirm", "release", "cancel"], "observation": "Customer, product, quantity and task reference match the admitted task request. Price and deadline are checked separately.", "resolver": "deterministic_field_match"},
+        {"id": "acceptance_policy_is_admitted", "applicable_stages": ["confirm", "release", "cancel"], "observation": "The active predicate ids and parameters come from the registered policy version, not from the action proposal. Verify every derived.erp_amount_facts target, currency, units, quantity, list price, budget and lead-days input against the original admitted sources and proposal. The boolean budget_enabled, quantity_range_enabled and minimum_lead_days_enabled fields must exactly match policy applicability; no missing field means disabled. Do not invent thresholds.", "resolver": "registered_policy"},
+        {"id": "acceptance_budget_covers_list", "observation": "Compare requested quantity times admitted list price with the admitted pretax budget. Use the sealed calculation; cancellation polarity is fixed by Runtime.", "resolver": "deterministic_arithmetic", "enabled_field": "budget_enabled", "numeric_group": "eligibility"},
+        {"id": "acceptance_quantity_minimum", "observation": "Compare the request quantity with the active minimum quantity.", "resolver": "deterministic_arithmetic", "enabled_field": "quantity_range_enabled", "numeric_group": "eligibility"},
+        {"id": "acceptance_quantity_maximum", "observation": "Compare the request quantity with the active maximum quantity.", "resolver": "deterministic_arithmetic", "enabled_field": "quantity_range_enabled", "numeric_group": "eligibility"},
+        {"id": "acceptance_minimum_lead_days", "observation": "Compare the request lead days with the active minimum lead-days rule.", "resolver": "deterministic_arithmetic", "enabled_field": "minimum_lead_days_enabled", "numeric_group": "eligibility"},
+        {"id": "proposal_scope_matches_requests", "observation": "For this action's target requests, proposed targets match the admitted request identities and scope. Do not require this action to cover unrelated requests or other actions; whole-task coverage belongs to the shared portfolio check. Numeric eligibility and confirm/cancel composition are checked by the separate registered numeric CHECKs; do not recompute them here.", "resolver": "semantic_evidence"},
+        {"id": "confirm_payload_and_supply_are_valid", "applicable_stages": ["confirm", "release"], "observation": "The draft quotation passes Odoo's native confirmation check; commercial fields and commitment date match policy; and the confirmed subset is supported by shared portfolio_plan_valid and lineage_closure_valid.", "resolver": "odoo_native_transition"},
+        {"id": "cancel_target_is_unlocked_and_scope_exact", "applicable_stages": ["cancel"], "observation": "The target is not locked and cancellation includes only failing seeded task orders; supply feasibility is not a cancellation prerequisite.", "resolver": "odoo_native_transition"}
       ],
       "requires_shared": {"confirm": ["portfolio_plan_valid", "lineage_closure_valid"], "release": ["portfolio_plan_valid", "lineage_closure_valid"], "cancel": []}
     },
@@ -372,26 +461,12 @@
       "required_payload_fields": ["state", "customer_ref", "product_code", "quantity", "price_unit", "commitment_days"],
       "decision": "ALL_APPLICABLE",
       "checks": [
-        {
-          "id": "target_is_unique_fresh_draft_so",
-          "observation": "The quotation exists once, remains draft/sent, passes Odoo's native confirmation error check, and its relevant fields match the admitted snapshot.",
-          "resolver": "odoo_native_transition"
-        },
-        {
-          "id": "request_identity_matches_order",
-          "observation": "Customer, product, quantity and task reference match the admitted task request. Price and deadline are checked separately.",
-          "resolver": "deterministic_field_match"
-        },
-        {
-          "id": "commercial_terms_match_policy",
-          "observation": "Unit price is list price, untaxed total is within budget, and any required sales payment term matches registered semantics.",
-          "resolver": "deterministic_arithmetic"
-        },
-        {
-          "id": "commitment_is_feasible",
-          "observation": "The commitment date is within the request deadline and shared portfolio_plan_valid provides an on-time supply path.",
-          "resolver": "deterministic_date_check"
-        }
+        {"id": "target_is_unique_fresh_draft_so", "observation": "The quotation exists once, remains draft/sent, passes Odoo's native confirmation error check, and its relevant fields match the admitted snapshot.", "resolver": "odoo_native_transition"},
+        {"id": "request_identity_matches_order", "observation": "Customer, product, quantity and task reference match the admitted task request. Price and deadline are checked separately.", "resolver": "deterministic_field_match"},
+        {"id": "sales_terms_sources_match", "observation": "The admitted target amount view matches the proposal and original request/product/policy sources, including currency, units, list price and budget. Any required payment term matches the actual policy. No guessed fields or policy defaults.", "resolver": "semantic_evidence"},
+        {"id": "sales_unit_price_matches_list", "observation": "Compare proposed unit price with the admitted list price.", "resolver": "deterministic_arithmetic"},
+        {"id": "sales_untaxed_total_within_budget", "observation": "Compare proposed quantity times proposed unit price with the admitted pretax budget.", "resolver": "deterministic_arithmetic"},
+        {"id": "commitment_is_feasible", "observation": "The commitment date is within the request deadline and shared portfolio_plan_valid provides an on-time supply path.", "resolver": "deterministic_date_check"}
       ],
       "requires_shared": ["portfolio_plan_valid", "lineage_closure_valid"]
     },
@@ -403,32 +478,14 @@
       "required_payload_fields": ["state", "vendor_ref", "product_code", "quantity", "unit_cost", "planned_arrival_days", "origin_refs"],
       "decision": "ALL_APPLICABLE",
       "checks": [
-        {
-          "id": "target_is_unique_fresh_draft_po",
-          "observation": "The RFQ exists once, remains draft/sent, passes Odoo's native confirmation check, and its relevant fields match the admitted snapshot.",
-          "resolver": "odoo_native_transition"
-        },
-        {
-          "id": "vendor_offer_is_allowed",
-          "observation": "Vendor, product and route resolve to an admitted offer and are not forbidden or disrupted.",
-          "resolver": "deterministic_field_match"
-        },
-        {
-          "id": "quantity_and_price_match_tier",
-          "observation": "Horizon-wide quantity respects min/max/vendor-note caps and unit price equals the applicable offer tier.",
-          "resolver": "deterministic_arithmetic"
-        },
-        {
-          "id": "delivery_date_is_feasible",
-          "observation": "Planned receipt is no earlier than vendor lead time and no later than every linked consumer need date.",
-          "resolver": "deterministic_date_check"
-        },
-        {
-          "id": "replacement_avoids_broken_path",
-          "applicable_stages": ["replacement_release"],
-          "observation": "No replacement PO/MO resolves to the broken supplier offer or workcenter.",
-          "resolver": "deterministic_supply_graph"
-        }
+        {"id": "target_is_unique_fresh_draft_po", "observation": "The RFQ exists once, remains draft/sent, passes Odoo's native confirmation check, and its relevant fields match the admitted snapshot.", "resolver": "odoo_native_transition"},
+        {"id": "vendor_offer_is_allowed", "observation": "Vendor, product and route resolve to an admitted offer and are not forbidden or disrupted. Verify the target amount view, currencies, units, horizon coverage, selected tier and min/max/vendor cap against original admitted sources. horizon_quantity requires a complete admitted aggregate with provenance; do not invent or optimize a purchase plan. vendor_cap_enabled must reflect explicit policy applicability. Missing bounds or unsupported aggregation remain missing.", "resolver": "deterministic_field_match"},
+        {"id": "purchase_quantity_minimum", "observation": "Compare the admitted complete horizon quantity with the applicable offer minimum.", "resolver": "deterministic_arithmetic"},
+        {"id": "purchase_quantity_maximum", "observation": "Compare the admitted complete horizon quantity with the applicable offer maximum.", "resolver": "deterministic_arithmetic"},
+        {"id": "purchase_quantity_vendor_cap", "observation": "Compare complete horizon quantity with an explicitly active vendor cap.", "resolver": "deterministic_arithmetic", "enabled_field": "vendor_cap_enabled"},
+        {"id": "purchase_unit_price_matches_tier", "observation": "Compare proposed unit cost with the price of the admitted applicable tier.", "resolver": "deterministic_arithmetic"},
+        {"id": "delivery_date_is_feasible", "observation": "Planned receipt is no earlier than vendor lead time and no later than every linked consumer need date.", "resolver": "deterministic_date_check"},
+        {"id": "replacement_avoids_broken_path", "applicable_stages": ["replacement_release"], "observation": "No replacement PO/MO resolves to the broken supplier offer or workcenter.", "resolver": "deterministic_supply_graph"}
       ],
       "requires_shared": ["portfolio_plan_valid", "lineage_closure_valid"],
       "stage_prerequisites": {
@@ -495,46 +552,19 @@
       "required_payload_fields": ["state", "invoice_role", "order_ref", "customer_ref", "amount_untaxed", "payment_term", "tax_basis", "currency"],
       "decision": "ALL_APPLICABLE",
       "checks": [
-        {
-          "id": "target_is_unique_fresh_draft_customer_invoice",
-          "observation": "The exact account.move exists once, is a draft out_invoice, and state, move_type, partner, terms, amounts, taxes, lines, SO lineage and write_date match the admitted snapshot.",
-          "resolver": "odoo_snapshot"
-        },
-        {
-          "id": "invoice_is_natively_postable",
-          "observation": "Posting rights and Odoo-native required journal, company, currency, date, partner, active accounts and balanced non-empty lines are valid; no known posting blocker is present.",
-          "resolver": "odoo_native_transition"
-        },
-        {
-          "id": "invoice_identity_and_lineage_match_order",
-          "observation": "Invoice partner and lines link exactly to the intended retained confirmed sale order under the same proposal.",
-          "resolver": "deterministic_lineage_graph"
-        },
-        {
-          "id": "payment_term_matches_policy",
-          "observation": "Sale order and invoice use the registered payment-term semantics, not only a coincidentally similar label.",
-          "resolver": "deterministic_field_match"
-        },
-        {
-          "id": "invoice_stage_preconditions_hold",
-          "observation": "Regular-only posts once. A down payment posts before the balance. A regular balance requires the authorized down-payment checkpoint and no unexpected invoice role. Future stages need not already exist.",
-          "resolver": "deterministic_invoice_flow"
-        },
-        {
-          "id": "invoice_amount_matches_mode_and_value",
-          "observation": "Inputs are threshold, mode=fixed_amount|percentage, value and currency tolerance. regular_only expects the full SO untaxed total; downpayment computes the configured fixed or percentage amount independently; balance expects SO untaxed total minus the authorized down payment. Each invoice must match its own stage.",
-          "resolver": "deterministic_arithmetic"
-        },
-        {
-          "id": "invoice_taxes_match_odoo_computation",
-          "observation": "Draft invoice taxes and totals match admitted SO lines, product taxes and fiscal position. Tax-free is required only by explicit public policy, never inferred from a pre-tax budget or hidden verifier.",
-          "resolver": "deterministic_arithmetic"
-        },
-        {
-          "id": "invoice_scope_is_exact",
-          "observation": "Only retained orders are invoice targets, and the proposal schedules exactly the registered invoice stages for each retained order.",
-          "resolver": "deterministic_set_comparison"
-        }
+        {"id": "target_is_unique_fresh_draft_customer_invoice", "observation": "The exact account.move exists once, is a draft out_invoice, and state, move_type, partner, terms, amounts, taxes, lines, SO lineage and write_date match the admitted snapshot.", "resolver": "odoo_snapshot"},
+        {"id": "invoice_is_natively_postable", "observation": "Posting rights and Odoo-native required journal, company, currency, date, partner, active accounts and balanced non-empty lines are valid; no known posting blocker is present.", "resolver": "odoo_native_transition"},
+        {"id": "invoice_identity_and_lineage_match_order", "observation": "Invoice partner and lines link exactly to the intended retained confirmed sale order under the same proposal.", "resolver": "deterministic_lineage_graph"},
+        {"id": "payment_term_matches_policy", "observation": "Sale order and invoice use the registered payment-term semantics, not only a coincidentally similar label.", "resolver": "deterministic_field_match"},
+        {"id": "invoice_stage_preconditions_hold", "observation": "Regular-only posts once. A down payment posts before the balance. A regular balance requires the authorized down-payment checkpoint and no unexpected invoice role. Future stages need not already exist. Verify the target amount view and proposal against source order, actual invoice, policy mode, threshold, decimal percentage ratio, authorized downpayment, currency and non-negative currency tolerance. Runtime chooses fixed/percentage arithmetic only from the admitted mode field; unknown mode is missing evidence. Do not calculate taxes or construct invoice amounts here.", "resolver": "deterministic_invoice_flow"},
+        {"id": "invoice_regular_amount_matches_order", "observation": "Compare regular invoice untaxed amount with the source sales-order untaxed total within admitted currency tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["regular"]},
+        {"id": "invoice_fixed_downpayment_matches_policy", "observation": "Compare downpayment untaxed amount with the policy fixed amount within admitted tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["downpayment"], "invoice_mode": "fixed_amount"},
+        {"id": "invoice_percentage_downpayment_matches_policy", "observation": "Compare downpayment with source order untaxed total times the admitted decimal downpayment ratio, within tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["downpayment"], "invoice_mode": "percentage"},
+        {"id": "invoice_balance_matches_remaining", "observation": "Compare balance invoice with source order untaxed total minus the authorized downpayment, within tolerance.", "resolver": "deterministic_arithmetic", "applicable_stages": ["balance"]},
+        {"id": "invoice_tax_basis_matches_policy", "observation": "The tax basis, product taxes and fiscal position match the admitted instruction and source order. Expected tax values must come from the admitted Odoo tax result for these exact lines, currency and revision. Do not reconstruct Odoo taxes or infer zero tax from pretax budgets.", "resolver": "semantic_evidence"},
+        {"id": "invoice_tax_amount_matches_odoo", "observation": "Compare actual invoice tax amount with the admitted Odoo tax result within currency tolerance.", "resolver": "deterministic_arithmetic"},
+        {"id": "invoice_total_matches_untaxed_and_tax", "observation": "Compare actual total with actual untaxed plus Odoo tax result within currency tolerance.", "resolver": "deterministic_arithmetic"},
+        {"id": "invoice_scope_is_exact", "observation": "Only retained orders are invoice targets, and the proposal schedules exactly the registered invoice stages for each retained order.", "resolver": "deterministic_set_comparison"}
       ],
       "requires_shared": ["supply_plan_released_checkpoint"],
       "stage_prerequisites": {

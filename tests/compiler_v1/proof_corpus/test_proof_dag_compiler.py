@@ -378,8 +378,11 @@ def test_disposition_keeps_common_checks_for_confirm_and_cancel(confirmation_sta
         "target_is_unique_fresh_reviewable_so",
         "request_identity_matches_order",
         "acceptance_policy_is_admitted",
-        "acceptance_predicates_match_requested_action",
-        "proposal_matches_policy_outcome",
+        "acceptance_budget_covers_list",
+        "acceptance_quantity_minimum",
+        "acceptance_quantity_maximum",
+        "acceptance_minimum_lead_days",
+        "proposal_scope_matches_requests",
     }
     assert by_action["confirm_order"] == common | {
         "confirm_payload_and_supply_are_valid"

@@ -77,6 +77,7 @@ def compile_review(
         revision=1 + len(completed_action_ids),
         completed_action_ids=completed_action_ids,
         source_fingerprints=fingerprints,
+        source_records={key: item.record for key, item in source_by_id.items()},
     )
     plan = type(plan).model_validate({
         **plan.model_dump(mode="json"),

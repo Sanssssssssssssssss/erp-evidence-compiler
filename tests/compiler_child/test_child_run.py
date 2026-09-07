@@ -70,6 +70,50 @@ def test_retry_exhaustion_requires_revision_before_resume(tmp_path) -> None:
     assert extension._resume_block(events) is None
 
 
+@pytest.mark.parametrize("status", ["batch_rolled_back", "batch_partially_committed", "frontier_rolled_back"])
+def test_failed_batch_cannot_resume_until_explicit_recheck(tmp_path, status) -> None:
+    events = tmp_path / "events.jsonl"
+    failure = {"kind": "child_paused", "payload": {"pause": {"status": status}}} if status == "frontier_rolled_back" else {"kind": "model_thinking", "payload": {"status": status}}
+    trail = [failure, {"kind": "checkpoint_saved", "payload": {}}, {"kind": "model_thinking", "payload": {"status": "completed"}}]
+    events.write_text("\n".join(json.dumps(event) for event in trail) + "\n", encoding="utf-8")
+    assert extension._resume_block(events)["status"] == status
+    with events.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"kind": "checkpoint_revised", "payload": {}}) + "\n")
+    assert extension._resume_block(events) is None
+
+
+def test_parent_gets_repair_status_and_repeat_resume_makes_no_model_call(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ERP_COMPILER_RUN_ROOT", str(tmp_path))
+    directory = tmp_path / "parent_session" / "test-run"
+    directory.mkdir(parents=True)
+    checkpoint = {"compiler_run_id": "test-run", "revision": 1, "status": "running", "compile_status": "NON_CONVERGED"}
+    (directory / "request.json").write_text("{}", encoding="utf-8")
+    (directory / "checkpoint.json").write_text(json.dumps(checkpoint), encoding="utf-8")
+    calls = []
+
+    def compiler(request, saved, run_id, run_dir, checkpoint_sink, progress_sink):
+        calls.append(run_id)
+        progress_sink("model_thinking", {"status": "batch_partially_committed"}, "Batch needs repair")
+        checkpoint_sink(checkpoint)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(extension, "_run_compiler", compiler)
+    monkeypatch.setattr(extension, "_proof_snapshot", lambda saved: {**extension._checkpoint_summary(saved), "compile_status": saved["compile_status"]})
+    tau = _Tau(tmp_path)
+    extension.setup(tau)
+
+    async def scenario():
+        first = await tau.tools["evidence_reviewer"].execute("first", {"compiler_run_id": "test-run"})
+        assert first.details["status"] == "requires_revision"
+        assert first.details["next_action"] == "recheck_evidence_review"
+        assert json.loads(first.content[0].text)["compile_status"] == "NON_CONVERGED"
+        second = await tau.tools["evidence_reviewer"].execute("repeat", {"compiler_run_id": "test-run"})
+        assert second.details["status"] == "requires_revision"
+        assert calls == ["test-run"]
+
+    asyncio.run(scenario())
+
+
 def test_typed_manager_proposal_round_trips_into_child_request() -> None:
     manager_request = {
         "scenario_id": "repair-one-order",
@@ -399,8 +443,9 @@ def test_child_is_traced_while_running_and_resumes_after_error(tmp_path, monkeyp
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("custom_catalog", [False, True])
 def test_manager_only_erp_call_freezes_the_new_compiler_request(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, custom_catalog
 ) -> None:
     manager_request = {
         "scenario_id": "repair-one-order",
@@ -462,6 +507,16 @@ def test_manager_only_erp_call_freezes_the_new_compiler_request(
     )
     monkeypatch.setenv("ERP_COMPILER_SOURCE_MANIFEST", str(manifest))
     monkeypatch.setenv("ERP_COMPILER_RUN_ROOT", str(tmp_path / "runs"))
+    from erp_agent_odoo.capabilities.proof_dag import load_proof_catalog
+
+    catalog = load_proof_catalog()
+    if custom_catalog:
+        catalog["deployment_revision"] = "numeric-controls:r1"
+        catalog_path = tmp_path / "trusted-catalog.json"
+        catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        monkeypatch.setenv("ERP_COMPILER_REVIEW_CATALOG", str(catalog_path))
+    else:
+        monkeypatch.delenv("ERP_COMPILER_REVIEW_CATALOG", raising=False)
     captured: dict[str, Any] = {}
 
     def fake_compiler(
@@ -505,6 +560,7 @@ def test_manager_only_erp_call_freezes_the_new_compiler_request(
     assert captured["requirement_pack_id"] == "evidence_action_review_v1"
     assert captured["active_requirement_ids"] == ["erp_action_plan_valid"]
     assert set(captured["catalog"]) >= {"templates", "shared_nodes"}
+    assert captured["catalog"] == catalog
     assert captured["action_proposal"]["proposal_hash"] == proposal.proposal_hash
     assert set(tau.tools["evidence_reviewer"].parameters["properties"]) == {
         "compiler_run_id",

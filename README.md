@@ -92,3 +92,45 @@ three checks supported. The raw local receipt is intentionally not published.
 
 Known limits and historical observations are recorded under [`docs/`](docs/).
 
+The numeric-boundary development branch adds optional catalog-owned comparison
+contracts and per-stage usage receipts. See
+[`docs/numeric-decision-contract.md`](docs/numeric-decision-contract.md) for its
+scope. Catalog schema 8 splits default ERP amount checks into 16 short, exact-field
+programs within the existing six templates. Production use requires admitted
+amount views and original-source provenance. The read-only native Odoo adapter in
+`capabilities/odoo_amounts.py` projects actual captured records into those views;
+it does not add a write gate.
+
+Use `native_record_source(model, row, instance=...)` for actual Odoo read results,
+then `erp_amount_source(target_ref, native_sources=..., policy=...)`. Keep the
+original records and their field provenance in the admitted packet. The policy
+must explicitly scope targets, enabled rules and bounds. Missing policy values
+stay missing; unsupported records raise an admission error.
+
+The adapter currently accepts one commercial order line, matching currencies
+and units, no discounts, an explicitly selected supplier tier and a closed
+purchase horizon. Invoice taxes come from native `tax_totals`, not reconstructed
+tax arithmetic. Authorized prior downpayments must be posted native downpayment
+invoices. It does not select supply plans, infer capacity, grant cancellation
+authority or supply missing evidence. Native transition observations must name
+the tested actor and record revision; a superuser preflight does not establish
+another actor's posting rights.
+
+After a batch rolls back or only partially commits, the durable child requires
+an explicit CHECK correction through the existing `recheck_evidence_review`
+tool before another resume. Later checkpoint/progress events do not clear that
+failure boundary. Normal `PLAN_READY` resumes and interrupted work still use
+the same child id.
+
+In evidence-review mode, record-field tools take a locator and let Runtime read
+the exact typed value from the admitted snapshot. A CHECK submission selects one
+candidate Binding, or supplies a precise gap note without proof terms. Runtime
+expands the Binding's Claim/Witness closure, including explicitly selected,
+already submitted ancestors; it never inherits an ancestor's verdict. The
+Verifier independently accepts or rejects the complete Binding and explicitly
+attests whether it examined the full CHECK source scope. Runtime expands those
+selections into the existing Kernel artifact; it cannot mark the scope examined
+without that attestation. Source, revision, numeric and proof guards still apply.
+Executor completion comes from real sandbox submissions, not generated tool
+markup or a model-written summary. These changes leave the public parent tools,
+six templates and Kernel proof format intact.

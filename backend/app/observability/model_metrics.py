@@ -66,6 +66,36 @@ def summarize_model_metrics(calls: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def summarize_compiler_stages(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    """Account for all attempts; missing usage remains unknown, with a lower bound."""
+    keys = ("prompt_tokens", "cached_tokens", "completion_tokens", "reasoning_tokens", "total_tokens")
+    stages = {}
+    for role in dict.fromkeys(str(call.get("role") or "unknown") for call in calls):
+        attempts = [call for call in calls if str(call.get("role") or "unknown") == role]
+        known, complete = {}, {}
+        usages = [(call.get("usage") or {}) if "usage" in call else call for call in attempts]
+        for key in keys:
+            known[key] = sum(int(usage[key]) for usage in usages if usage.get(key) is not None)
+            # A failed stream may omit its final response even when earlier turns have usage.
+            complete[key] = not any(call.get("error") for call in attempts) and all(
+                usage.get(key) is not None and key not in usage.get("partial_metrics", []) for usage in usages
+            )
+        ids = {call["logical_invocation_id"] for call in attempts if call.get("logical_invocation_id")}
+        turns_known = all(call.get("provider_turn_count") is not None and not call.get("error") for call in attempts)
+        stages[role] = {
+            **{key: known[key] if complete[key] else None for key in keys},
+            "known_token_lower_bound": known,
+            "usage_complete": complete,
+            "uncached_prompt_tokens": known["prompt_tokens"] - known["cached_tokens"] if complete["prompt_tokens"] and complete["cached_tokens"] else None,
+            "logical_calls": len(ids) if all(call.get("logical_invocation_id") for call in attempts) else None,
+            "transport_attempts": len(attempts),
+            "failed_attempts": sum(bool(call.get("error")) for call in attempts),
+            "provider_turns": sum(call["provider_turn_count"] for call in attempts) if turns_known else None,
+            "model_seconds": round(sum(float(call.get("latency_ms") or 0) for call in attempts) / 1000, 3),
+        }
+    return stages
+
+
 def trace_duration_ms(payload: dict[str, Any], raw: dict[str, Any]) -> int | None:
     return _int_or_none(payload.get("latency_ms") or payload.get("duration_ms") or raw.get("duration_ms"))
 

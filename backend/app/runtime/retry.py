@@ -35,6 +35,22 @@ def is_transient_tool_error(exc: BaseException) -> bool:
     return _is_transient(exc, include_types=("timeout", "temporary", "ioerror", "oserror", "subprocess"))
 
 
+def error_chain(exc: BaseException) -> list[dict[str, object]]:
+    """Keep transport causes without logging URLs, headers or credentials."""
+    chain = []
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        row = {"type": type(exc).__name__}
+        for key in ("status_code", "errno", "winerror"):
+            value = getattr(exc, key, None)
+            if isinstance(value, int):
+                row[key] = value
+        chain.append(row)
+        exc = exc.__cause__ or exc.__context__
+    return chain
+
+
 def _is_transient(exc: BaseException, *, include_types: tuple[str, ...]) -> bool:
     name = type(exc).__name__.lower()
     text = f"{name}: {exc}".lower()

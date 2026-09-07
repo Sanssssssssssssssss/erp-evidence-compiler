@@ -105,3 +105,27 @@ def test_id_only_tool_does_not_change_units_or_expose_reference_kind():
     assert not failed["ok"]
     assert "dimensioned and dimensionless" in failed["error"]["message"]
     assert not result.calculation_witnesses
+
+
+@pytest.mark.parametrize("defect", ["", "value", "revision", "source_scope", "duplicate_identity"])
+def test_record_field_tool_derives_identity_but_still_validates_observations(defect):
+    result = sandbox()
+    tool = next(item for item in _sandbox_tools(result, allowed_source_ids={"record"} if defect != "source_scope" else {"doc"})
+        if item.name == "bind_record_field_claim")
+    assert not {"subject", "source_id", "value"} & tool.params_json_schema["properties"].keys()
+    args = dict(predicate="amount", claim_id="amount",
+        locator=dict(record_ref="record", record_revision="r1", field_path="/amount"))
+    if defect == "value":
+        args["value"] = 91.25
+    if defect == "revision":
+        args["locator"]["record_revision"] = "stale"
+    if defect == "duplicate_identity":
+        args["subject"] = "another-record"
+    response = json.loads(asyncio.run(tool.on_invoke_tool(None, json.dumps(args))))
+    assert response["ok"] == (not defect), response
+    if not defect:
+        claim = result.evidence_ir.claims[0]
+        assert claim.source_id == claim.subject == claim.locator.record_ref == "record"
+        assert type(claim.value) is float and claim.value == 90.25
+    else:
+        assert not result.evidence_ir.claims

@@ -19,6 +19,7 @@ from app.compiler_runtime.runtime import EvidenceCompilerRuntime, PreparedSource
 from app.compiler_runtime.sandbox import SourceRecord
 from app.config import get_settings
 from app.llm import LlmClient
+from app.observability.model_metrics import summarize_compiler_stages
 from app.state.persistence import atomic_write_text
 from erp_agent_odoo.evidence_review import compile_review
 from erp_agent_odoo.capabilities.proof_dag import load_proof_catalog
@@ -64,8 +65,8 @@ def control(variant="supported"):
     ):
         proposal["actions"].append({"action_id": action_id, "action_kind": kind, "stage": "release", "target_record_refs": [target], "action_payload": {"payload_version": 1, "snapshot_revision": "proposal:r3", "records": [{"record_ref": target, "record_revision": "candidate:r3", "values": values}]}})
     observations = {
-        "amount_limit": "The proposed transfer amount and currency match the request and satisfy the policy's per-transfer limit. Use the numeric comparison tool.",
-        "transfer_authorization": "The same payment request has both distinct required approvers and a CLEAR screening result explicitly tied to it. A screening revision without the result is insufficient.",
+        "amount_limit": "The admitted payment request amount is no greater than the applicable per-transfer limit in the admitted instruction. Compare request amount <= policy limit using the numeric tool with matching currencies; target identity and proposal matching are independently checked by transfer_authorization.",
+        "transfer_authorization": "The proposal's target, amount and currency match the admitted payment request. That same request has both distinct required approvers and a CLEAR screening result explicitly tied to it. A screening revision without the result is insufficient.",
         "disposal_authorization": "The proposed destruction is for the same quarantined batch and quantity that the quality officer explicitly authorized and signed; no additional batch or quantity is authorized.",
     }
     recipes = {}
@@ -74,6 +75,7 @@ def control(variant="supported"):
             {"group_id": "policy", "source": "BOUND_SOURCE", "source_role": "instruction", "method": "READ_AND_EXTRACT", "facts": ["applicable rule", "scope and exceptions"]},
             {"group_id": "material", "source": "BOUND_SOURCE", "source_role": "evidence", "method": "READ_AND_EXTRACT", "facts": ["target identity", "amount or quantity", "authorization", "screening result if transfer"]},
         ]}
+    recipes["amount_limit"]["numeric_decision"] = {"operation": "LTE", "true_status": "SUPPORTED", "policy_operand": 1}
     templates = []
     for template_id, action_kind, check_ids in (
         ("treasury_controls.v1", "treasury.payment.release", ["amount_limit", "transfer_authorization"]),
@@ -106,7 +108,14 @@ class ReceiptRuntime(EvidenceCompilerRuntime):
             if previous_sink:
                 previous_sink(result)
         kwargs["result_sink"] = capture
-        return super()._run_phase(**kwargs)
+        try:
+            return super()._run_phase(**kwargs)
+        finally:
+            calls = [call.to_debug_dict() for call in self.llm.calls]
+            stages = summarize_compiler_stages(calls)
+            save(self.output_dir / "stage-usage.json", stages)
+            atomic_write_text(self.output_dir / "model-calls.jsonl", "".join(json.dumps(call, ensure_ascii=False) + "\n" for call in calls))
+            print(json.dumps({"phase_finished": name, "usage": stages.get(name)}, ensure_ascii=False), flush=True)
 
 
 def load_fixture(path):
@@ -169,10 +178,11 @@ def run(variant, output_dir, *, fixture_path=None):
         atomic_write_text(output_dir / "reasoning.txt", "\n\n".join(f"{call.role}\n{call.reasoning_full}" for call in llm.calls))
     expected = {"supported": "SUPPORTED", "contradicted": "CONTRADICTED", "missing": "NOT_FOUND"}[variant]
     turns = [call.provider_turn_count for call in llm.calls]
-    summary = {"variant": variant, "fixture_kind": "synthetic complete-material control, not live Odoo", "expected": expected, "compile_status": result.compile_status if result else None, "semantic_status": result.semantic_status if result else None, "failure": failure, "logical_calls": runtime.phase_counts, "provider_turns": sum(turns) if turns and all(value is not None for value in turns) else None, "usage": [jsonable(call.usage) for call in llm.calls], "wall_seconds": round(time.perf_counter()-started, 3), "passed": bool(result and result.compile_status == "COMMITTED" and result.semantic_status == expected)}
+    summary = {"variant": variant, "fixture_kind": "synthetic admitted materials, not live Odoo", "expected": expected, "compile_status": result.compile_status if result else None, "semantic_status": result.semantic_status if result else None, "failure": failure, "logical_calls": runtime.phase_counts, "provider_turns": sum(turns) if turns and all(value is not None for value in turns) else None, "usage": [jsonable(call.usage) for call in llm.calls], "wall_seconds": round(time.perf_counter()-started, 3), "passed": bool(result and result.compile_status == "COMMITTED" and result.semantic_status == expected)}
     summary["metrics"] = _summary([call.to_debug_dict() for call in llm.calls], summary["wall_seconds"], checkpoint=jsonable(result.checkpoint) if result else None)
     summary["provider_turns"] = summary["metrics"]["provider_turn_count"]
     summary["correctness_passed"] = summary["passed"]
+    summary["stage_usage"] = summarize_compiler_stages([call.to_debug_dict() for call in llm.calls])
     if (output_dir / "session.sqlite").exists():
         with sqlite3.connect(output_dir / "session.sqlite") as db:
             summary["sqlite_integrity"] = db.execute("PRAGMA integrity_check").fetchone()[0]

@@ -36,6 +36,7 @@ class ModelCallRecord:
     input_preview: str
     output_preview: str
     error: str = ""
+    error_details: list[dict[str, Any]] = field(default_factory=list)
     system_prompt: str = ""
     payload: Any = None
     raw_response: str = ""
@@ -81,6 +82,7 @@ class ModelCallRecord:
             "schema_retry_attempted": self.schema_retry_attempted,
             "retry_of": self.retry_of,
             "error": self.error,
+            "error_details": self.error_details,
             "content_chars": self.content_chars,
             "recovered_by": self.recovered_by,
             "reasoning_chars": self.reasoning_chars,
@@ -125,6 +127,7 @@ class ModelCallRecord:
             "schema_retry_attempted": self.schema_retry_attempted,
             "retry_of": self.retry_of,
             "error": self.error,
+            "error_details": self.error_details,
             "content_chars": self.content_chars,
             "recovered_by": self.recovered_by,
             "reasoning_excerpt": self.reasoning_excerpt,

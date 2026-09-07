@@ -193,6 +193,7 @@ def _run_compiler(
     )
     from app.config import get_settings
     from app.llm import LlmClient
+    from app.observability.model_metrics import summarize_compiler_stages
     from erp_agent_odoo.evidence_review import compile_review
 
     settings = get_settings()
@@ -275,6 +276,10 @@ def _run_compiler(
                 stream.write(
                     json.dumps(call.to_debug_dict(), ensure_ascii=False, default=str) + "\n"
                 )
+        _write_json(run_dir / "stage-usage.json", summarize_compiler_stages([
+            json.loads(line) for line in model_log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]))
     return {
         "status": "completed",
         "checkpoint": result.checkpoint.model_dump(mode="json") if result.checkpoint else None,
@@ -383,8 +388,16 @@ def _resume_block(path: Path) -> dict[str, Any] | None:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        pause = event.get("payload", {}).get("pause") if event.get("kind") == "child_paused" else None
-        return pause if isinstance(pause, dict) and pause.get("status") == "frontier_rolled_back" else None
+        if event.get("kind") == "checkpoint_revised":
+            return None
+        payload = event.get("payload", {})
+        pause = payload.get("pause") if event.get("kind") == "child_paused" else None
+        if isinstance(pause, dict) and pause.get("status") == "frontier_rolled_back":
+            return pause
+        if event.get("kind") == "model_thinking" and payload.get("status") in {
+            "batch_rolled_back", "batch_partially_committed",
+        }:
+            return payload
     return None
 
 
@@ -425,6 +438,8 @@ def _result(details: dict[str, Any]) -> Any:
             "compiler_run_id",
             "revision",
             "checkpoint_status",
+            "compile_status",
+            "semantic_status",
             "active_check_id",
             "completed_check_ids",
             "total_checks",
@@ -516,7 +531,7 @@ def setup(tau: Any) -> None:
                 "requirement_pack_hash": pack.content_hash,
                 "active_requirement_ids": active_requirement_ids,
                 "sources": _resolve_sources(source_refs),
-                "catalog": load_proof_catalog(),
+                "catalog": load_proof_catalog(os.getenv("ERP_COMPILER_REVIEW_CATALOG") or None),
                 "policy_excerpt": pack.policy_excerpt_for(active_requirement_ids),
                 "requirement_requiredness": {"erp_action_plan_valid": True},
                 "action_proposal": action_proposal.model_dump(mode="json"),
@@ -597,11 +612,12 @@ def setup(tau: Any) -> None:
         try:
             outcome = await child
             checkpoint = _read_json(checkpoint_path)
+            pause = _resume_block(event_path)
             details = {
-                "status": str(outcome.get("status") or "completed"),
+                "status": "requires_revision" if pause else str(outcome.get("status") or "completed"),
                 "compiler_run_id": run_id,
                 **_proof_snapshot(checkpoint),
-                "next_action": "inspect_evidence_review",
+                "next_action": "recheck_evidence_review" if pause else "inspect_evidence_review",
             }
         except Exception as exc:
             checkpoint = _read_json(checkpoint_path) if checkpoint_path.is_file() else None

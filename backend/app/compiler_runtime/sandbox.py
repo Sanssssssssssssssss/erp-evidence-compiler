@@ -24,6 +24,7 @@ from .proof_terms import (
 
 
 _LINE_LOCATOR = re.compile(r"\blines?\s+(\d+)(?:\s*[-:]\s*(\d+))?\b", re.IGNORECASE)
+_UNOBSERVED = object()
 _PAGE_TEXT_LOCATOR = re.compile(
     r"\bpage\s+(\d+)(?:\s+(?:text|body(?:\s+text)?))?\s*$",
     re.IGNORECASE,
@@ -693,7 +694,7 @@ class EvidenceSandbox:
         *,
         subject: str,
         predicate: str,
-        value: Any,
+        value: Any = _UNOBSERVED,
         source_id: str,
         locator: RecordFieldLocator | Mapping[str, Any],
         confidence: str = "medium",
@@ -733,10 +734,14 @@ class EvidenceSandbox:
                 repair="Use a record_field locator with record_ref, RFC 6901 field_path, and record_revision.",
                 validation_errors=exc.errors(include_url=False, include_input=False),
             )
+        if value is _UNOBSERVED:
+            value, observation_error = self._record_field_observation(
+                source_id=source_id, locator=normalized_locator,
+            )
+            if observation_error is not None:
+                return self._failure(action, **observation_error)
         observation_error = self._record_observation_error(
-            source_id=source_id,
-            locator=normalized_locator,
-            value=value,
+            source_id=source_id, locator=normalized_locator, value=value,
         )
         if observation_error is not None:
             return self._failure(action, **observation_error)
@@ -1610,16 +1615,15 @@ class EvidenceSandbox:
                 raise TypeError("pointer traverses a scalar")
         return current
 
-    def _record_observation_error(
+    def _record_field_observation(
         self,
         *,
         source_id: str,
         locator: RecordFieldLocator,
-        value: Any,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[Any, dict[str, Any] | None]:
         source = self._sources.get(source_id)
         if source is None:
-            return {
+            return None, {
                 "code": "SOURCE_NOT_FOUND",
                 "message": f"Source {source_id!r} is not available in this run.",
                 "repair": "Use a structured source admitted to this run.",
@@ -1628,7 +1632,7 @@ class EvidenceSandbox:
         expected_fingerprint = self._base_ir.source_fingerprints.get(source_id)
         actual_fingerprint = hashlib.sha256(source.content.encode()).hexdigest()
         if expected_fingerprint != actual_fingerprint:
-            return {
+            return None, {
                 "code": "SOURCE_FINGERPRINT_MISMATCH",
                 "message": "The structured source content does not match its admitted fingerprint.",
                 "repair": "Re-admit the current canonical record snapshot before binding claims.",
@@ -1636,21 +1640,21 @@ class EvidenceSandbox:
             }
         record_fields = source.record_fields
         if record_fields is None:
-            return {
+            return None, {
                 "code": "LOCATOR_SOURCE_TYPE_MISMATCH",
                 "message": "record_field locators require a structured record source.",
                 "repair": "Use bind_claim for document text, or select a structured record source.",
                 "source_id": source_id,
             }
         if locator.record_ref != source_id:
-            return {
+            return None, {
                 "code": "LOCATOR_RECORD_MISMATCH",
                 "message": "The locator record_ref does not match source_id.",
                 "repair": "Use the same admitted record_ref for source_id and locator.record_ref.",
                 "source_id": source_id,
             }
         if locator.record_revision != source.record_revision:
-            return {
+            return None, {
                 "code": "SOURCE_REVISION_MISMATCH",
                 "message": "The locator record_revision is stale for this source snapshot.",
                 "repair": "Read the current record source and bind against its exact revision.",
@@ -1659,12 +1663,24 @@ class EvidenceSandbox:
         try:
             observed = self._resolve_json_pointer(record_fields, locator.field_path)
         except (KeyError, IndexError, TypeError, ValueError):
-            return {
+            return None, {
                 "code": "LOCATOR_FIELD_NOT_FOUND",
                 "message": "The field_path does not resolve inside the admitted record.",
                 "repair": "Use an RFC 6901 path returned by read_source.record_fields.",
                 "source_id": source_id,
             }
+        return observed, None
+
+    def _record_observation_error(
+        self,
+        *,
+        source_id: str,
+        locator: RecordFieldLocator,
+        value: Any,
+    ) -> dict[str, Any] | None:
+        observed, error = self._record_field_observation(source_id=source_id, locator=locator)
+        if error is not None:
+            return error
         try:
             observed_json = json.dumps(
                 observed,

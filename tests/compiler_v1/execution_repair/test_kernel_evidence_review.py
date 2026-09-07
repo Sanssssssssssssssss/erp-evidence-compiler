@@ -25,7 +25,7 @@ PACK = RequirementPack.from_path(ROOT / "policies/evidence_action_review_v1.json
 
 
 def _fixture(*, status="SUPPORTED", requires_calculation=False, values=(), mode="evidence_review", record_kind="", live=False,
-             action_kind="confirm", policy_text="Maximum amount: 100."):
+             action_kind="confirm", policy_text="Maximum amount: 100.", numeric_decision=None):
     pack = PACK if mode == "evidence_review" else ODOO_ERP_ACTION_PLAN_PACK
     sources = {
         "policy": SourceRecord(
@@ -87,6 +87,7 @@ def _fixture(*, status="SUPPORTED", requires_calculation=False, values=(), mode=
         action_kind=action_kind, proposal_hash="proposal:r1", source_snapshot_hash=source_hash,
         policy_source_hash=fingerprints["policy"], requirement_pack_hash=pack.content_hash,
         source_refs=list(sources), execution_mode=mode, requires_calculation=requires_calculation,
+        **({"numeric_decision": numeric_decision} if numeric_decision is not None else {}),
         resolver_program=RegisteredResolverProgram(resolver_id="semantic_evidence", evidence=[{
             "group_id": "request", "source": "BOUND_SOURCE", "method": "MODEL_QUOTE",
             "source_role": "request", "facts": ["approval", "amount"],
@@ -216,6 +217,90 @@ def test_true_arithmetic_does_not_override_an_independent_semantic_conflict():
 def test_required_calculation_cannot_be_replaced_with_prose():
     artifact, sources, pack = _fixture(requires_calculation=True)
     assert "TERMINAL_WITNESS_REQUIRED" in _codes(_compile(artifact, sources, pack))
+
+
+@pytest.mark.parametrize("defect,code", [
+    ("missing_link", "NUMERIC_DECISION_LINK_REQUIRED"),
+    ("polarity", "NUMERIC_DECISION_CONTRACT_MISMATCH"),
+    ("operation", "NUMERIC_DECISION_CONTRACT_MISMATCH"),
+    ("self_compare", "NUMERIC_DECISION_OPERANDS_INVALID"),
+    ("renamed_self_compare", "NUMERIC_DECISION_OPERANDS_INVALID"),
+    ("policy_operand", "NUMERIC_DECISION_OPERANDS_INVALID"),
+])
+def test_sealed_numeric_decision_rejects_wrong_model_proofs(defect, code):
+    artifact, sources, pack = _fixture(requires_calculation=True, values=(110,), numeric_decision={
+        "operation": "LTE", "true_status": "SUPPORTED", "policy_operand": None if defect == "renamed_self_compare" else 1,
+    })
+    assessment = artifact.assessments[0]
+    assessment.strong_status_links = [StrongStatusLink(witness_id="w0", true_status="SUPPORTED")]
+    if defect == "missing_link":
+        assessment.strong_status_links = []
+    elif defect == "polarity":
+        assessment.strong_status_links[0].true_status = "CONTRADICTED"
+    else:
+        operands = ["amount0", "limit"]
+        if defect == "self_compare":
+            operands = ["amount0", "amount0"]
+        elif defect == "renamed_self_compare":
+            alias = next(item for item in artifact.evidence_ir.claims if item.id == "amount0").model_copy(update={"id": "alias"})
+            artifact.evidence_ir.claims.append(alias)
+            assessment.claim_ids.append(alias.id)
+            artifact.submitted_claim_refs[assessment.check_id].append(alias.id)
+            artifact.binding_proposals[0].term_refs.append(ProofTermRef(kind="CLAIM", ref_id=alias.id))
+            operands = ["amount0", "alias"]
+        elif defect == "policy_operand":
+            operands.reverse()
+        artifact.calculation_witnesses = [compute_witness(
+            CalculationRequest(id="w0", check_id=assessment.check_id, facet_ref="complete_action_plan",
+                               operation="GTE" if defect == "operation" else "LTE",
+                               operands=[ProofTermRef(kind="CLAIM", ref_id=ref) for ref in operands]),
+            claims={item.id: item for item in artifact.evidence_ir.claims}, witnesses={}, policy_values={},
+            evidence_snapshot_hash=artifact.evidence_ir.source_snapshot_hash(), policy_snapshot_hash=artifact.policy_hash,
+        )]
+    proof = _compile(artifact, sources, pack)
+    assert code in _codes(proof)
+    assert proof.decisions[0].status != "SUPPORTED"
+
+
+@pytest.mark.parametrize("amount,status,true_status,action", [
+    (90, "SUPPORTED", "SUPPORTED", "confirm"),
+    (110, "CONTRADICTED", "SUPPORTED", "confirm"),
+    (110, "SUPPORTED", "CONTRADICTED", "cancel"),
+    (90, "NOT_FOUND", "SUPPORTED", "confirm"),
+])
+def test_numeric_decision_preserves_valid_polarity_and_missing_evidence(amount, status, true_status, action):
+    artifact, sources, pack = _fixture(status=status, requires_calculation=True, values=(amount,),
+        action_kind=action, numeric_decision={"operation": "LTE", "true_status": true_status, "policy_operand": 1})
+    if status != "NOT_FOUND":
+        artifact.assessments[0].strong_status_links = [StrongStatusLink(witness_id="w0", true_status=true_status)]
+    proof = _compile(artifact, sources, pack)
+    assert proof.decisions[0].status == status
+    assert not proof.diagnostics
+
+
+def test_numeric_decision_accepts_a_sum_of_distinct_evidence_operands():
+    artifact, sources, pack = _fixture(status="CONTRADICTED", requires_calculation=True, values=(90, 110),
+        numeric_decision={"operation": "LTE", "true_status": "SUPPORTED", "policy_operand": 1})
+    assessment = artifact.assessments[0]
+    computed = {}
+    for witness_id, operation, operands in [
+        ("sum", "SUM", [("CLAIM", "amount0"), ("CLAIM", "amount1")]),
+        ("comparison", "LTE", [("WITNESS", "sum"), ("CLAIM", "limit")]),
+    ]:
+        computed[witness_id] = compute_witness(
+            CalculationRequest(id=witness_id, check_id=assessment.check_id, facet_ref="complete_action_plan",
+                operation=operation, operands=[ProofTermRef(kind=kind, ref_id=ref) for kind, ref in operands]),
+            claims={item.id: item for item in artifact.evidence_ir.claims}, witnesses=computed, policy_values={},
+            evidence_snapshot_hash=artifact.evidence_ir.source_snapshot_hash(), policy_snapshot_hash=artifact.policy_hash,
+        )
+    artifact.calculation_witnesses = list(computed.values())
+    artifact.submitted_witness_refs[assessment.check_id] = list(computed)
+    assessment.accepted_witness_ids = list(computed)
+    assessment.strong_status_links = [StrongStatusLink(witness_id="comparison", true_status="SUPPORTED")]
+    binding = artifact.binding_proposals[0]
+    binding.term_refs = [ref for ref in binding.term_refs if ref.kind != "WITNESS"] + [ProofTermRef(kind="WITNESS", ref_id="comparison")]
+    proof = _compile(artifact, sources, pack)
+    assert proof.decisions[0].status == "CONTRADICTED" and not proof.diagnostics
 
 
 def test_decisive_link_cannot_name_an_unknown_witness():

@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT / "src"), str(ROOT)]
 
-from app.compiler_runtime.runtime import EvidenceCompilerRuntime, VerificationBatch
+from app.compiler_runtime.runtime import EvidenceCompilerRuntime, EvidenceVerificationBatch
 from app.config import get_settings
 from app.llm import LlmClient
 from app.state.persistence import atomic_write_text
@@ -46,7 +46,8 @@ def run(output_dir: Path) -> None:
     try:
         batch = EvidenceCompilerRuntime(llm, settings=settings)._run_phase(
             name="fine_verifier", prompt_file="evidence_verifier.md",
-            payload=payload, output_type=VerificationBatch, max_turns=None,
+            prompt_version_key="evidence_verifier",
+            payload=payload, output_type=EvidenceVerificationBatch, max_turns=None,
             max_output_tokens=None,
             result_sink=captured.append,
         )

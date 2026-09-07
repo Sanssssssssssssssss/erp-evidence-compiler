@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 import traceback
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ from tau_coding.provider_config import (
     ProviderSettings,
 )
 from tau_coding.session import CodingSession, CodingSessionConfig
+from tau_coding.resources import TauResourcePaths
 
 HERE = Path(__file__).resolve().parent
 EXTENSION = (
@@ -54,6 +56,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=12)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path)
+    parser.add_argument("--resume-from", type=Path, help="Replay a saved child snapshot in an isolated parent session.")
     return parser.parse_args()
 
 
@@ -99,6 +102,22 @@ async def run(args: argparse.Namespace) -> Path:
         "the completed or irrecoverable child status."
     )
     _write(source_manifest, manifest)
+    if resume_from := getattr(args, "resume_from", None):
+        checkpoint = json.loads((resume_from / "checkpoint.json").read_text(encoding="utf-8"))
+        child_id = checkpoint["compiler_run_id"]
+        destination = run_dir / "child-runs" / run_id / child_id
+        destination.mkdir(parents=True)
+        copied = {}
+        for name in ("request.json", "checkpoint.json", "events.jsonl"):
+            shutil.copyfile(resume_from / name, destination / name)
+            copied[name] = str(resume_from / name)
+        _write(run_dir / "recovery-inputs.json", copied)
+        instruction = (
+            f"Inspect the saved evidence review {child_id!r}. If already completed, report its status. "
+            "Otherwise call evidence_reviewer to resume that exact compiler_run_id ONCE, then report "
+            "the returned result and stop, including if it fails. Do not start a new review, recheck, "
+            "change sources or infer an expected verdict. This is one bounded checkpoint recovery test."
+        )
     os.environ.update(
         {
             "LLM_THINKING_TYPE": args.thinking,
@@ -168,6 +187,7 @@ async def run(args: argparse.Namespace) -> Path:
                 model=model,
                 storage=JsonlSessionStorage(run_dir / "tau-session.jsonl"),
                 cwd=workspace,
+                resource_paths=TauResourcePaths(root=run_dir / "tau-home", cwd=workspace, agents_root=run_dir / "agents-home"),
                 tools=(),
                 max_turns=args.max_turns,
                 session_id=run_id,
@@ -217,16 +237,6 @@ async def run(args: argparse.Namespace) -> Path:
             if checkpoint.get("status") == "completed"
             else "incomplete",
             **profile,
-            "parent_model_calls": len(assistants),
-            "parent_usage": {
-                "input": sum(message.usage.input for message in assistants),
-                "output": sum(message.usage.output for message in assistants),
-                "cache_read": sum(message.usage.cache_read for message in assistants),
-                "cache_write": sum(message.usage.cache_write for message in assistants),
-                "reasoning": sum(
-                    message.usage.reasoning or 0 for message in assistants
-                ),
-            },
             "tool_calls": tool_calls,
             "compiler_run_id": checkpoint.get("compiler_run_id"),
             "compiler_status": checkpoint.get("status"),
@@ -250,6 +260,19 @@ async def run(args: argparse.Namespace) -> Path:
         summary["error"] = {"type": type(exc).__name__, "message": str(exc)}
         (run_dir / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
     finally:
+        assistants = [message for message in session.messages if isinstance(message, AssistantMessage)] if session else []
+        keys = ("input", "output", "cache_read", "cache_write", "reasoning", "total_tokens")
+        summary["parent_model_calls"] = len(assistants)
+        summary["parent_known_usage_lower_bound"] = {
+            key: sum(getattr(message.usage, key) or 0 for message in assistants) for key in keys
+        }
+        summary["parent_usage"] = {
+            key: summary["parent_known_usage_lower_bound"][key]
+            if assistants and not summary.get("error") and all(
+                not message.error_message and message.stop_reason not in {"error", "aborted"}
+                and getattr(message.usage, key) is not None for message in assistants
+            ) else None for key in keys
+        }
         _write(run_dir / "summary.json", summary)
         if session is not None:
             await session.aclose()

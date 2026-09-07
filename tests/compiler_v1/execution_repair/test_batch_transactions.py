@@ -190,6 +190,44 @@ def test_only_latest_submission_proof_terms_are_published(monkeypatch):
     assert all("obsolete" not in item.id for item in result.artifact.binding_proposals)
 
 
+@pytest.mark.parametrize('retained', [1, 2, 4])
+def test_rechecking_an_earlier_node_canonicalizes_completion_and_delivers_feedback(monkeypatch, retained):
+    from app.compiler_runtime.runtime import CompilerCorrection, revise_compiler_checkpoint, _ordered_check_ids
+    plan, proposal, prepared, pack = _case({'first': [], **{f'retained{i}': [] for i in range(retained)}})
+    runtime, _, _, _ = _runtime(monkeypatch, pack, rejected={'first'})
+    first = _run(runtime, plan, proposal, prepared)
+    target = _ordered_check_ids(plan)[0]
+    revised = revise_compiler_checkpoint(first.checkpoint, CompilerCorrection(
+        kind='RECHECK', target_check_id=target, message='Review the missing authorization scope against the original sources.'), requirement_pack=pack)
+    resumed, _, _, _ = _runtime(monkeypatch, pack)
+    execute = resumed.execute_plan
+    received = []
+    def capture(**kwargs):
+        received.extend(kwargs.get('runtime_observations', []))
+        return execute(**kwargs)
+    monkeypatch.setattr(resumed, 'execute_plan', capture)
+    result = _run(resumed, plan, proposal, prepared, checkpoint=revised)
+    assert result.compile_status=='COMMITTED' and result.checkpoint.status=='completed'
+    assert result.checkpoint.completed_check_ids==_ordered_check_ids(plan)
+    assert received and received[0]['diagnostic_code']=='HUMAN_RECHECK_REQUESTED'
+    assert received[0]['message']==revised.corrections[-1].message
+    legacy = result.checkpoint.model_copy(deep=True, update={
+        'status':'running', 'compile_status':'NON_CONVERGED', 'semantic_status':None,
+        'completed_check_ids':list(reversed(result.checkpoint.completed_check_ids))})
+    def forbidden(**_kwargs):
+        raise AssertionError('A fully proved checkpoint must finalize without a model')
+    monkeypatch.setattr(resumed, 'execute_plan', forbidden)
+    recovered = _run(resumed, plan, proposal, prepared, checkpoint=legacy)
+    assert recovered.compile_status=='COMMITTED' and recovered.proof==result.proof
+    for ids in ([target, target], ['invented']):
+        with pytest.raises(ValueError, match='duplicate or unknown'):
+            _run(resumed, plan, proposal, prepared, checkpoint=legacy.model_copy(update={'completed_check_ids':ids}))
+    forged = legacy.model_copy(deep=True)
+    forged.proof.decisions[0].status='CONTRADICTED'
+    with pytest.raises(ValueError, match='Kernel replay'):
+        _run(resumed, plan, proposal, prepared, checkpoint=forged)
+
+
 def test_batch_does_not_weaken_legacy_resolver_proof_requirements(monkeypatch):
     plan, proposal, prepared, pack = _case({"a": []}, mode="registered_resolver")
     runtime, calls, events, _inputs = _runtime(monkeypatch, pack)

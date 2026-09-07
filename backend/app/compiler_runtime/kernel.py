@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from graphlib import TopologicalSorter
 import hashlib
 import json
@@ -1525,6 +1526,51 @@ def _evidence_review_terminal_failure(
             "This CHECK requires a source-grounded calculation consumed by its terminal relationship",
             "perform the calculation required by the plan and reference its result",
         )
+    decision = contract.numeric_decision
+    if decision is not None:
+        if len(assessment.strong_status_links) != 1:
+            return _TermFailure(
+                "NUMERIC_DECISION_LINK_REQUIRED",
+                "The sealed numeric CHECK requires one decisive comparison",
+                "reference the registered comparison and its sealed true_status",
+            )
+        link = assessment.strong_status_links[0]
+        witness = current.get(link.witness_id)
+        if (
+            witness is None or witness.id not in terminal_ids
+            or witness.operation != decision.operation
+            or link.true_status != decision.true_status
+        ):
+            return _TermFailure(
+                "NUMERIC_DECISION_CONTRACT_MISMATCH",
+                "The decisive comparison differs from its registered operation, owner or polarity",
+                "execute this CHECK's registered comparison without changing its meaning",
+            )
+        origins = [_numeric_operand_origins(item.ref, claims, witnesses) for item in witness.operands]
+        invalid = witness.operands[0].ref == witness.operands[1].ref or (
+            len(origins[0]) == len(origins[1]) == 1 and origins[0] == origins[1]
+        )
+        if decision.policy_operand is not None:
+            policy_sources = {
+                source_id for source_id, source in (source_records or {}).items()
+                if source.provenance.get("role") == "instruction"
+                and source_id in contract.source_refs
+            }
+            policy_origins = origins[decision.policy_operand]
+            evidence_origins = origins[1 - decision.policy_operand]
+            invalid = invalid or not policy_origins or not evidence_origins or any(
+                origin[0] != "CLAIM" or origin[1] not in policy_sources for origin in policy_origins
+            ) or any(origin[0] != "CLAIM" or origin[1] in policy_sources for origin in evidence_origins)
+        if invalid:
+            return _TermFailure(
+                "NUMERIC_DECISION_OPERANDS_INVALID",
+                "The comparison reuses the same observation or misplaces the policy operand",
+                "use separate grounded evidence and the admitted instruction in their registered positions",
+            )
+        if decision.steps:
+            failure = _numeric_program_failure(contract, witness, current, claims, source_records or {})
+            if failure is not None:
+                return failure
     # Polarity belongs to the reviewed proposition: false eligibility can justify
     # cancellation. Mixed semantic/numeric checks need not be decided by arithmetic.
     for link in assessment.strong_status_links:
@@ -1549,6 +1595,68 @@ def _evidence_review_terminal_failure(
                 "review the comparison's meaning for this proposed action",
             )
     return None
+
+
+def _numeric_program_failure(contract, terminal, witnesses, claims, sources):
+    """Match the existing step vocabulary to exact admitted target fields."""
+    decision = contract.numeric_decision
+    failure = _TermFailure(
+        "NUMERIC_FIELD_PROGRAM_MISMATCH",
+        "The comparison does not use the registered target fields and calculation steps",
+        "bind the exact admitted fields; missing fields or unsupported calculations remain NOT_FOUND",
+    )
+    if len(contract.target_record_refs) != 1:
+        return failure
+    target = contract.target_record_refs[0]
+    source = sources.get(target)
+    if source is None or target not in contract.source_refs or source.kind != "record" or source.record_model != decision.record_model:
+        return failure
+    bound_steps = {}
+    remaining = dict(witnesses)
+    for step in decision.steps:
+        matches = [witness for witness in remaining.values()
+            if witness.operation == step.operation and len(witness.operands) == len(step.operands)
+            and all(_registered_operand_matches(expected, actual.ref,
+                target_record_ref=target, target_revision=source.record_revision,
+                claims=claims, bound_steps=bound_steps)
+                for expected, actual in zip(step.operands, witness.operands, strict=True))]
+        if len(matches) != 1:
+            return failure
+        bound_steps[step.step_id] = matches[0]
+        del remaining[matches[0].id]
+    if remaining or bound_steps[decision.steps[-1].step_id].id != terminal.id:
+        return failure
+    proposal = next((record for record in contract.proposal_records if record.record_ref == target), None)
+    for pointer, key in decision.proposal_fields.items():
+        values = [claims[operand.ref.ref_id].value for witness in bound_steps.values()
+            for operand in witness.operands if operand.ref.kind == "CLAIM"
+            and isinstance(claims[operand.ref.ref_id].locator, RecordFieldLocator)
+            and claims[operand.ref.ref_id].locator.field_path == pointer]
+        try:
+            if proposal is None or not values or any(Decimal(str(value)) != Decimal(str(proposal.values.get(key))) for value in values):
+                return failure
+        except InvalidOperation:
+            return failure
+    return None
+
+
+def _numeric_operand_origins(
+    ref: ProofTermRef,
+    claims: Mapping[str, Claim],
+    witnesses: Mapping[str, CalculationWitness],
+) -> set[tuple[str, str, str]]:
+    """Use already-validated lineage, so renaming a Claim cannot change its origin."""
+    if ref.kind == "CLAIM":
+        claim = claims[ref.ref_id]
+        locator = claim.locator
+        location = locator.field_path if isinstance(locator, RecordFieldLocator) else claim.quote
+        return {("CLAIM", claim.source_id, location)}
+    if ref.kind == "POLICY":
+        return {("POLICY", ref.ref_id, "")}
+    return set().union(*(
+        _numeric_operand_origins(item.ref, claims, witnesses)
+        for item in witnesses[ref.ref_id].operands
+    ))
 
 
 def _compile_erp_check(

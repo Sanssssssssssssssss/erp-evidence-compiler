@@ -31,12 +31,13 @@ from app.runtime.agents_sdk import (
 )
 from app.runtime.context_partition import usage_from_result
 from app.runtime.reasoning_capture import extract_reasoning_from_result
-from app.runtime.retry import is_transient_llm_error
+from app.runtime.retry import error_chain, is_transient_llm_error
 
 from .kernel import compile_review_artifact
 from .models import (
     ActionProposal,
     AssessmentStatus,
+    BusinessGapCode,
     CheckAssessment,
     CompiledProof,
     CompileStatus,
@@ -48,6 +49,7 @@ from .models import (
     RecordFieldLocator,
     RegisteredActionContract,
     ReviewArtifact,
+    StrongStatusLink,
 )
 from .policy import (
     canonical_policy_snapshot,
@@ -84,7 +86,7 @@ class _PhaseResponseHooks(AgentHooks[Any]):
         self.responses.append(response)
 
 
-COMPILER_VERSION = "typed_evidence_compiler_runtime_v16"
+COMPILER_VERSION = "typed_evidence_compiler_runtime_v18"
 EXECUTOR_MAX_TURNS = 24
 CHECK_FRONTIER_ATTEMPT_CAP = 2
 CHECK_MODEL_CALL_BUDGET = 4
@@ -93,9 +95,9 @@ PROMPT_VERSIONS = {
     "executor": "typed_evidence_executor_v31",
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v1",
-    "evidence_executor": "bounded_evidence_executor_v2_three_way",
-    "evidence_verifier": "bounded_evidence_verifier_v1",
-    "erp_task_compiler": "source_bound_erp_compiler_v2_applicability",
+    "evidence_executor": "bounded_evidence_executor_v8_applicable_evidence",
+    "evidence_verifier": "bounded_evidence_verifier_v7_applicable_evidence",
+    "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v30",
 }
 _PROMPT_ROOT = Path(__file__).with_name("prompts")
@@ -207,6 +209,41 @@ class VerificationBatch(_RuntimeModel):
     assessments: list[CheckAssessment]
 
 
+class EvidenceAssessment(_RuntimeModel):
+    check_id: str
+    accepted_binding_ids: list[str] = Field(default_factory=list)
+    strong_status_links: list[StrongStatusLink] = Field(default_factory=list)
+    source_scope_reviewed: bool = Field(strict=True, description="True only after independently examining every source in this CHECK's action_contract.source_refs, including contrary evidence and gaps. Delivery alone is not examination.")
+    reason: str = ""
+    missing_fact: str = ""
+    gap_code: BusinessGapCode | None = None
+    status: AssessmentStatus
+
+
+class EvidenceVerificationBatch(_RuntimeModel):
+    assessments: list[EvidenceAssessment]
+
+
+def _expand_verified_closures(batch: EvidenceVerificationBatch, checks: Sequence[Mapping[str, Any]]) -> VerificationBatch:
+    """Expand only explicitly accepted bindings from this frozen verification request."""
+    closures = {check["id"]: {c["binding_id"]: c for c in check["terminal_closures"]} for check in checks}
+    scopes = {check["id"]: list((check.get("action_contract") or {}).get("source_refs", [])) for check in checks}
+    assessments = []
+    for item in batch.assessments:
+        available = closures.get(item.check_id, {})
+        if set(item.accepted_binding_ids) - set(available):
+            raise ValueError("Verifier accepted a binding outside this CHECK's submitted closures")
+        selected = [available[key] for key in item.accepted_binding_ids]
+        assessments.append(CheckAssessment(
+            **item.model_dump(exclude={"source_scope_reviewed"}),
+            claim_ids=sorted({key for c in selected for key in c["claim_ids"]}),
+            accepted_witness_ids=sorted({key for c in selected for key in c["witness_ids"]}),
+            source_ids=sorted({key for c in selected for key in c["source_ids"]}),
+            examined_source_ids=scopes.get(item.check_id, []) if item.source_scope_reviewed else [],
+        ))
+    return VerificationBatch(assessments=assessments)
+
+
 class _ListSourcesInput(_RuntimeModel):
     pass
 
@@ -228,10 +265,7 @@ class _BindClaimInput(_RuntimeModel):
 
 
 class _BindRecordFieldClaimInput(_RuntimeModel):
-    subject: str
     predicate: str
-    value: Any = Field(description="Copy the exact JSON value and type from record_fields at the supplied field_path; do not convert a record number to a string.")
-    source_id: str
     locator: RecordFieldLocator
     confidence: str = "medium"
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -260,6 +294,41 @@ class _SubmitCheckInput(_RuntimeModel):
     witness_ids: list[str] = Field(default_factory=list)
     note: str = ""
     submission_id: str = ""
+
+
+class _SubmitEvidenceCheckInput(_RuntimeModel):
+    check_id: str
+    binding_proposals: list[SemanticBindingProposal] = Field(default_factory=list)
+    upstream_check_ids: list[str] = Field(default_factory=list, description="Optional declared ancestors whose already submitted grounded facts this binding also consumes. Runtime expands facts, never inherits verdicts.")
+    note: str = ""
+
+    @model_validator(mode="after")
+    def terminal_shape(self) -> _SubmitEvidenceCheckInput:
+        if not self.binding_proposals:
+            if self.upstream_check_ids or not self.note.strip():
+                raise ValueError("A missing-evidence submission requires a precise note and no upstream proof selection")
+        elif len(self.binding_proposals) != 1 or self.binding_proposals[0].relation not in {"CHECK_SATISFIED", "CHECK_VIOLATED"}:
+            raise ValueError("Submit exactly one supported or violated candidate binding, or no binding with a gap note")
+        return self
+
+
+def _expand_evidence_submission(data: _SubmitEvidenceCheckInput, sandbox: EvidenceSandbox, review: Mapping[str, Any]) -> _SubmitCheckInput:
+    """Project a model's explicit evidence selections into the existing sandbox contract."""
+    if set(data.upstream_check_ids) - set(review.get("upstream_check_ids", [])):
+        raise ValueError("Selected upstream CHECK is outside this CHECK's declared ancestry")
+    bindings = [item.model_copy(deep=True) for item in data.binding_proposals]
+    if data.upstream_check_ids:
+        latest = {item.check_id: item for item in sandbox.latest_submissions()}
+        if any(key not in latest or not latest[key].binding_ids for key in data.upstream_check_ids):
+            raise ValueError("Selected upstream CHECK has no submitted terminal evidence; submit it first or report the gap")
+        upstream = _submitted_proof_terms(sandbox, check_ids=set(data.upstream_check_ids))
+        refs = [*bindings[0].term_refs,
+                *(ProofTermRef(kind="CLAIM", ref_id=key) for key in upstream["claim_ids"]),
+                *(ProofTermRef(kind="WITNESS", ref_id=key) for key in upstream["witness_ids"])]
+        bindings[0].term_refs = list({(ref.kind, ref.ref_id): ref for ref in refs}.values())
+    closure = _proof_terms_by_ids(sandbox, term_refs=(ref for binding in bindings for ref in binding.term_refs))
+    return _SubmitCheckInput(check_id=data.check_id, binding_proposals=bindings,
+        claim_ids=closure["claim_ids"], witness_ids=closure["witness_ids"], note=data.note)
 
 
 @dataclass(frozen=True)
@@ -1216,6 +1285,7 @@ class EvidenceCompilerRuntime:
                 "statement": node.statement,
                 "facet_refs": list(node.facet_refs),
                 "semantic_role_refs": list(node.semantic_role_refs),
+                "upstream_check_ids": _transitive_upstream_check_ids(plan, node.id),
                 "policy_refs": list(node.policy_refs),
                 "terminal_relations": (
                     list(node.action_contract.terminal_relations)
@@ -1559,6 +1629,7 @@ class EvidenceCompilerRuntime:
                 f"missing={sorted(expected_source_ids - visible_source_ids)}, "
                 f"extra={sorted(visible_source_ids - expected_source_ids)}"
             )
+        submission_notes = {item.check_id: item.note for item in sandbox.latest_submissions()}
         checks = []
         for node in plan.nodes:
             if node.kind != "CHECK" or node.id not in target_check_ids:
@@ -1567,6 +1638,7 @@ class EvidenceCompilerRuntime:
             checks.append(
                 {
                     **node.model_dump(mode="json"),
+                    **({"executor_note": submission_notes.get(node.id, "")} if evidence_lane else {}),
                     "submitted_claim_refs": candidate_ids,
                     "candidate_claims": [
                         claims[claim_id].model_dump(mode="json")
@@ -1630,11 +1702,13 @@ class EvidenceCompilerRuntime:
             prompt_file=("evidence_verifier.md" if evidence_lane else "registered_verifier.md" if registered_lane else "verifier.md"),
             prompt_version_key=("evidence_verifier" if evidence_lane else "registered_verifier" if registered_lane else "verifier"),
             payload=payload,
-            output_type=VerificationBatch,
+            output_type=EvidenceVerificationBatch if evidence_lane else VerificationBatch,
             max_turns=None if evidence_lane else 1,
             max_output_tokens=None,
             model_budget=model_budget,
         )
+        if evidence_lane:
+            batch = _expand_verified_closures(batch, checks)
         expected = {item["id"] for item in checks}
         actual = [item.check_id for item in batch.assessments]
         if len(actual) != len(set(actual)) or set(actual) != expected:
@@ -1876,10 +1950,8 @@ class EvidenceCompilerRuntime:
             if (
                 len(completed_set) != len(checkpoint.completed_check_ids)
                 or completed_set - set(ordered_check_ids)
-                or checkpoint.completed_check_ids
-                != [check_id for check_id in ordered_check_ids if check_id in completed_set]
             ):
-                raise ValueError("Compiler checkpoint completed CHECKs do not match plan order")
+                raise ValueError("Compiler checkpoint completed CHECKs contain duplicate or unknown IDs")
             nodes = {node.id: node for node in plan.nodes}
             if any(
                 not set(nodes[check_id].upstream_check_ids).issubset(completed_set)
@@ -1906,7 +1978,9 @@ class EvidenceCompilerRuntime:
             artifact = checkpoint.artifact
             proof = checkpoint.proof
             retry_count = checkpoint.retry_count
-            completed_check_ids = list(checkpoint.completed_check_ids)
+            # Older partial rechecks persisted completion order. Membership and
+            # proof closure remain validated; execution uses the canonical DAG order.
+            completed_check_ids = [key for key in ordered_check_ids if key in completed_set]
             _validate_checkpoint_proof_closure(
                 checkpoint,
                 requirement_requiredness=requiredness,
@@ -1979,6 +2053,9 @@ class EvidenceCompilerRuntime:
                     artifact=artifact,
                     proof=proof,
                     executor_session=executor_session,
+                    initial_feedback=[item for key in batch_check_ids for item in _correction_feedback(
+                        plan, key, latest_checkpoint.corrections,
+                    )],
                 )
             except Exception:
                 latest_checkpoint = latest_checkpoint.model_copy(
@@ -1997,6 +2074,7 @@ class EvidenceCompilerRuntime:
             retry_count += frontier_retries
             committed_ids = {item.check_id for item in assessments}
             completed_check_ids.extend(key for key in batch_check_ids if key in committed_ids)
+            completed_check_ids.sort(key=ordered_check_ids.index)
             batch_failed = not frontier_committed
             latest_checkpoint = CompilerRunCheckpoint(
                 compiler_run_id=run_id,
@@ -2085,6 +2163,7 @@ class EvidenceCompilerRuntime:
             retry_count += frontier_retries
             if frontier_committed:
                 completed_check_ids.append(check_id)
+                completed_check_ids.sort(key=ordered_check_ids.index)
             latest_checkpoint = CompilerRunCheckpoint(
                 compiler_run_id=run_id,
                 requirement_pack_id=self.requirement_pack.pack_id,
@@ -2495,6 +2574,7 @@ class EvidenceCompilerRuntime:
         artifact: ReviewArtifact,
         proof: CompiledProof,
         executor_session: Any | None = None,
+        initial_feedback: Sequence[dict[str, Any]] = (),
     ) -> tuple[
         EvidenceSandbox,
         list[CheckAssessment],
@@ -2533,6 +2613,7 @@ class EvidenceCompilerRuntime:
                 policy_excerpt=policy_excerpt,
                 sandbox=sandbox,
                 focus_check_id=focused,
+                runtime_observations=initial_feedback,
                 conversation=conversation,
                 model_budget=model_budget,
             )
@@ -2542,7 +2623,9 @@ class EvidenceCompilerRuntime:
                 if _check_submission_count(candidate_sandbox, check_id)
                 > before_submissions[check_id]
             }
-            if set(summary.completed_check_ids) != set(focused) or submitted != set(focused):
+            # A note-only missing-evidence submission is complete protocol work.
+            # The Verifier decides NOT_FOUND; the summary's unresolved list is not a gate.
+            if submitted != set(focused):
                 raise ModelBehaviorError(
                     "Batch Executor did not submit every focused CHECK"
                 )
@@ -2735,6 +2818,7 @@ class EvidenceCompilerRuntime:
             self.settings.llm_thinking_type,
         )
         response_hooks = _PhaseResponseHooks()
+        tool_only = name == "executor" and prompt_version_key == "evidence_executor"
         agent = Agent(
             name=name,
             instructions=prompt,
@@ -2750,9 +2834,9 @@ class EvidenceCompilerRuntime:
                 ),
             ),
             tools=list(tools),
-            output_type=FencedJsonOutputSchema(
+            output_type=None if tool_only else FencedJsonOutputSchema(
                 output_type,
-                strict_json_schema=output_type is VerificationBatch,
+                strict_json_schema=output_type in (VerificationBatch, EvidenceVerificationBatch),
             ),
             tool_use_behavior=tool_use_behavior,
             hooks=response_hooks,
@@ -2819,10 +2903,18 @@ class EvidenceCompilerRuntime:
                     max_turns=max_turns,
                     hooks=self.hooks,
                     run_config=run_config,
-                    stream_response=bool(tools),
+                    stream_response=True,
                     session=session,
                 )
-                parsed = result.final_output
+                if tool_only:
+                    completion = tool_use_behavior(None, [])
+                    if not completion.is_final_output:
+                        raise ModelBehaviorError("Executor ended without submitting every focused CHECK through real tools")
+                    # The SDK stringifies final_output when output_type is None.
+                    # Read the typed summary from accepted submissions, never parse that text.
+                    parsed = completion.final_output
+                else:
+                    parsed = result.final_output
                 if not isinstance(parsed, output_type):
                     parsed = output_type.model_validate(parsed)
                 raw = parsed.model_dump_json()
@@ -2881,6 +2973,7 @@ class EvidenceCompilerRuntime:
                     input_preview=input_text[:1400],
                     output_preview="",
                     error=f"{type(exc).__name__}: {exc}",
+                    error_details=error_chain(exc),
                     usage=usage_from_result(partial) if partial is not None else None,
                     provider_turn_count=len(partial.raw_responses) if partial is not None else None,
                     reasoning_full=reasoning.full_text if reasoning else "",
@@ -3204,6 +3297,7 @@ def _evidence_execution_payload(nodes: Sequence[Any], sandbox: EvidenceSandbox, 
             "instruction": node.statement,
             "execution_mode": contract.execution_mode,
             "requires_calculation": contract.requires_calculation,
+            "numeric_decision": contract.numeric_decision.model_dump(mode="json") if contract.numeric_decision else None,
             "facet_ref": node.facet_refs[0],
             "action_id": contract.owner_action_id,
             "action_kind": contract.action_kind,
@@ -3357,6 +3451,7 @@ def _proof_terms_by_ids(
     claim_ids: Iterable[str] = (),
     binding_ids: Iterable[str] = (),
     witness_ids: Iterable[str] = (),
+    term_refs: Iterable[ProofTermRef] = (),
 ) -> dict[str, Any]:
     claims = {item.id: item for item in sandbox.evidence_ir.claims}
     bindings = {item.id: item for item in sandbox.binding_proposals}
@@ -3367,7 +3462,7 @@ def _proof_terms_by_ids(
     selected_claim_ids = sorted(set(claim_ids))
     selected_binding_ids = sorted(set(binding_ids))
     selected_witness_ids = sorted(set(witness_ids))
-    pending = [ref for key in selected_binding_ids if key in bindings for ref in bindings[key].term_refs]
+    pending = [*term_refs, *(ref for key in selected_binding_ids if key in bindings for ref in bindings[key].term_refs)]
     pending.extend(ProofTermRef(kind="WITNESS", ref_id=key) for key in selected_witness_ids)
     visited: set[str] = set()
     while pending:
@@ -4022,6 +4117,7 @@ def _sandbox_tools(
     execution_program: Mapping[str, Any] | None = None,
 ) -> list[FunctionTool]:
     compute_input = _ComputeWitnessIdsInput if reference_ids_only else _ComputeWitnessInput
+    submit_input = _SubmitEvidenceCheckInput if reference_ids_only else _SubmitCheckInput
     strict_steps = list((execution_program or {}).get("steps") or [])
     strict_state: dict[str, Any] = {
         "step": 0,
@@ -4090,9 +4186,12 @@ def _sandbox_tools(
         return _observed_tool(
             "bind_record_field_claim",
             lambda: source_scope_failure(
-                "bind_record_field_claim", data.source_id
+                "bind_record_field_claim", data.locator.record_ref
             )
-            or sandbox.bind_record_field_claim(**data.model_dump()),
+            or sandbox.bind_record_field_claim(
+                source_id=data.locator.record_ref, subject=data.locator.record_ref,
+                **data.model_dump(),
+            ),
         )
 
     async def compute_witness_tool(_context: Any, raw: str) -> str:
@@ -4142,7 +4241,17 @@ def _sandbox_tools(
         return _observed_tool("run_registered_check", invoke)
 
     async def submit_check(_context: Any, raw: str) -> str:
-        data = _SubmitCheckInput.model_validate_json(raw)
+        data = submit_input.model_validate_json(raw)
+        if isinstance(data, _SubmitEvidenceCheckInput):
+            try:
+                data = _expand_evidence_submission(data, sandbox, (submission_review_by_check or {}).get(data.check_id, {}))
+            except ValueError as exc:
+                return _observed_tool("submit_check", lambda: {
+                    "ok": False, "action": "submit_check", "error": {
+                        "code": "EVIDENCE_SELECTION_INVALID", "message": str(exc),
+                        "repair": "Select only submitted declared upstream evidence, or submit no binding with an exact gap note.",
+                    },
+                })
         if progress_sink is not None:
             progress_sink("submit_check", None)
         if strict_steps:
@@ -4288,7 +4397,7 @@ def _sandbox_tools(
         ),
         _function_tool(
             "bind_record_field_claim",
-            "Append one fact resolved from an admitted structured record through a typed record_field locator; do not send a document quote.",
+            "Bind an observed record field. Runtime reads its exact typed value and derives source_id and subject from locator.record_ref. Do not supply value. Keep record_revision and field_path inside locator, without an extra record_field wrapper.",
             _BindRecordFieldClaimInput,
             bind_record_field_claim,
         ),
@@ -4306,8 +4415,9 @@ def _sandbox_tools(
         ),
         _function_tool(
             "submit_check",
-            "Submit candidate Claim refs, semantic bindings, Witness refs, and missing facts for one CHECK. This is not a verdict or commit. Submit once unless an explicit pre_commit_review asks for revision; an independent Fine Verifier follows.",
-            _SubmitCheckInput,
+            ("Submit one candidate binding or no binding with an exact gap note. Runtime derives claim_ids and witness_ids from binding term_refs; do not copy those lists. Optional upstream_check_ids expands already submitted ancestor facts, never verdicts. Independent verification follows."
+             if reference_ids_only else "Submit candidate Claim refs, semantic bindings, Witness refs, and missing facts for one CHECK. This is not a verdict or commit. Submit once unless an explicit pre_commit_review asks for revision; an independent Fine Verifier follows."),
+            submit_input,
             submit_check,
         ),
     ]

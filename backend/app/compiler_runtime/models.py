@@ -6,7 +6,7 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from app.compiler_runtime.graph_walk import reachable_ids
 from app.proof_schema import SemanticRole
@@ -187,12 +187,61 @@ class RegisteredResolverProgram(_CompilerModel):
         return value
 
 
+class NumericDecisionContract(_CompilerModel):
+    """A catalog-owned decisive comparison, never a model-selected polarity."""
+
+    operation: Literal["EQUAL", "GREATER_THAN", "GTE", "LTE"]
+    true_status: Literal["SUPPORTED", "CONTRADICTED"]
+    policy_operand: Literal[0, 1] | None = None
+    record_model: str = ""
+    steps: list[RegisteredPredicateStep] = Field(default_factory=list)
+    proposal_fields: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_steps(self) -> NumericDecisionContract:
+        if bool(self.record_model) != bool(self.steps):
+            raise ValueError("Field-bound numeric steps require a record model")
+        if self.steps:
+            seen = set()
+            used = set()
+            fields = set()
+            for step in self.steps:
+                if step.step_id in seen:
+                    raise ValueError("Numeric step ids must be unique")
+                for operand in step.operands:
+                    if operand.kind == "POLICY":
+                        raise ValueError("Field-bound steps use admitted record fields, not pack constants")
+                    if operand.kind == "STEP":
+                        if operand.ref_id not in seen:
+                            raise ValueError("Numeric steps must reference earlier steps")
+                        used.add(operand.ref_id)
+                    else:
+                        fields.add(operand.ref_id)
+                seen.add(step.step_id)
+            if self.steps[-1].operation != self.operation or seen - used != {self.steps[-1].step_id}:
+                raise ValueError("Numeric program must close in its one registered comparison")
+            if not set(self.proposal_fields) <= fields:
+                raise ValueError("Proposal field bindings must be consumed by the numeric program")
+        elif self.proposal_fields:
+            raise ValueError("Proposal field bindings require numeric steps")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_numeric(self, handler: Any) -> dict[str, Any]:
+        body = handler(self)
+        for key in ("record_model", "steps", "proposal_fields"):
+            if not getattr(self, key):
+                body.pop(key, None)
+        return body
+
+
 class ERPReviewContract(_CompilerModel):
     """Typed ERP CHECK contract retained from Task Compiler through Kernel."""
 
     contract_kind: Literal["ERP_CHECK"] = "ERP_CHECK"
     execution_mode: Literal["registered_resolver", "evidence_review"] = "registered_resolver"
     requires_calculation: bool = False
+    numeric_decision: NumericDecisionContract | None = None
     contract_id: str = ""
     logical_check_id: str
     execution_check_instance_id: str = ""
@@ -251,6 +300,10 @@ class ERPReviewContract(_CompilerModel):
 
     @model_validator(mode="after")
     def seal_contract(self) -> "ERPReviewContract":
+        if self.numeric_decision is not None and (
+            self.execution_mode != "evidence_review" or not self.requires_calculation
+        ):
+            raise ValueError("A numeric decision requires an evidence-review calculation")
         if self.check_kind == "action" and not self.proposal_records:
             raise ValueError("ERP action CHECK requires proposal records")
         if self.check_kind == "action" and set(self.target_record_refs) != {
@@ -292,6 +345,14 @@ class ERPReviewContract(_CompilerModel):
         self.contract_id = expected_instance_id
         return self
 
+    @model_serializer(mode="wrap")
+    def serialize_contract(self, handler: Any) -> dict[str, Any]:
+        body = handler(self)
+        # Frozen contracts without this new guarantee retain their exact hashes.
+        if self.numeric_decision is None:
+            body.pop("numeric_decision", None)
+        return body
+
 
 class ProofFreshness(_CompilerModel):
     status: IntegrityStatus
@@ -318,7 +379,7 @@ class RegisteredPredicateOperand(_CompilerModel):
 
 class RegisteredPredicateStep(_CompilerModel):
     step_id: str
-    operation: Literal["MULTIPLY", "EQUAL", "GREATER_THAN", "GTE", "LTE"]
+    operation: Literal["SUM", "MULTIPLY", "SUBTRACT", "ABS_DIFF", "EQUAL", "GREATER_THAN", "GTE", "LTE"]
     operands: list[RegisteredPredicateOperand]
 
     @field_validator("step_id")
@@ -334,7 +395,7 @@ class RegisteredPredicateStep(_CompilerModel):
 
     @property
     def returns_boolean(self) -> bool:
-        return self.operation != "MULTIPLY"
+        return self.operation in {"EQUAL", "GREATER_THAN", "GTE", "LTE"}
 
 
 class RegisteredPredicateOutcome(_CompilerModel):

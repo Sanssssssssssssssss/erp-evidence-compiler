@@ -1,0 +1,6 @@
+{
+  "routes": {
+    "post-invoice": "customer_invoice_post.v1"
+  },
+  "semantic_status": "CONTRADICTED"
+}

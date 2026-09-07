@@ -1,0 +1,227 @@
+{
+  "catalog_file": "catalog-default.json",
+  "manager_request": {
+    "scenario_id": "atomic-invoice-percentage",
+    "proposal_id": "proposal:invoice:70:r3",
+    "task_objective": "Review the proposed posting of this one first downpayment against the admitted instruction and snapshots. Do not calculate taxes or execute posting.",
+    "actions": [
+      {
+        "action_id": "post-invoice",
+        "action_kind": "account.move.action_post",
+        "stage": "downpayment",
+        "target_record_refs": [
+          "account.move:70"
+        ],
+        "action_payload": {
+          "payload_version": 1,
+          "snapshot_revision": "move:r3",
+          "records": [
+            {
+              "record_ref": "account.move:70",
+              "record_revision": "move:r3",
+              "values": {
+                "state": "draft",
+                "invoice_role": "downpayment",
+                "order_ref": "sale.order:9",
+                "customer_ref": "customer:C",
+                "amount_untaxed": "105.00",
+                "payment_term": "NET30",
+                "tax_basis": "tax excluded VAT 10%; FP:standard",
+                "currency": "USD"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "sources": [
+    {
+      "source_id": "policy:invoice",
+      "kind": "document",
+      "title": "Posting instruction",
+      "content": "Review only posting draft customer invoice account.move:70 for sale.order:9. This review does not execute posting. For a released sales order with untaxed value at least USD 500, issue one downpayment before any balance invoice. The downpayment is percentage mode: 10 percent of that order's untaxed total. This instruction authorizes this first downpayment; no balance or regular invoice is requested now. Currency tolerance is USD 0.01, comparison is inclusive. Use NET30. Product VAT is 10 percent, tax excluded, with the admitted fiscal position FP:standard. Use the admitted Odoo computation for the exact draft lines; do not infer zero tax from a pretax amount. Derived amount fields must match the original sales order, current draft invoice and this instruction. A missing required fact is unknown. This is a synthetic review fixture, not a production Odoo database.",
+      "provenance": {
+        "role": "instruction",
+        "fixture": true
+      }
+    },
+    {
+      "source_id": "sale.order:9",
+      "title": "sale.order:9",
+      "kind": "record",
+      "content": "",
+      "record_model": "sale.order",
+      "record_revision": "so:r4",
+      "structured_fields": {
+        "state": "sale",
+        "record_revision": "so:r4",
+        "customer_ref": "customer:C",
+        "order_untaxed_total": "1000.00",
+        "currency": "USD",
+        "payment_term": "NET30",
+        "order_lines": [
+          {
+            "id": "sale.order.line:91",
+            "product_ref": "product:P",
+            "quantity": "10",
+            "price_unit": "100.00",
+            "amount_untaxed": "1000.00",
+            "tax_ref": "account.tax:7"
+          }
+        ],
+        "release_state": "All supply prerequisites have been released and committed; no manufacturing workorders exist.",
+        "prior_invoice_refs": [],
+        "authorized_downpayment_amount": "100.00"
+      },
+      "provenance": {
+        "role": "evidence",
+        "fixture": true,
+        "source_records": {
+          "odoo:account.move:70": {
+            "revision": "move:r3",
+            "fingerprint": "16915f97cee4af9487b504996c0eec2c1a4a545a697d296f6d7cb2ac417d072a"
+          },
+          "odoo:sale.order:9": {
+            "revision": "so:r4",
+            "fingerprint": "66860f5dba599ef95d120c72a5108a137eda7f192789c1b5ad30948d7c98d9e9"
+          },
+          "instruction:invoice": {
+            "revision": "policy:r1",
+            "fingerprint": "27889620bb86c4718e1cc34cedca2af4b42cb9533fd687c3f0b4c64c8356f421"
+          }
+        },
+        "scope": "synthetic native-shaped receipt, not live Odoo"
+      }
+    },
+    {
+      "source_id": "native:invoice:70",
+      "title": "native:invoice:70",
+      "kind": "record",
+      "content": "",
+      "record_model": "odoo.account.move.snapshot",
+      "record_revision": "move:r3",
+      "structured_fields": {
+        "record_revision": "move:r3",
+        "state": "draft",
+        "move_type": "out_invoice",
+        "customer_ref": "customer:C",
+        "partner_id": "customer:C",
+        "order_ref": "sale.order:9",
+        "invoice_role": "downpayment",
+        "amount_untaxed": "105.00",
+        "amount_tax": "10.50",
+        "amount_total": "115.50",
+        "currency": "USD",
+        "payment_term": "NET30",
+        "tax_basis": "tax excluded VAT 10%; FP:standard",
+        "invoice_lines": [
+          {
+            "id": "account.move.line:701",
+            "sale_line_ids": [
+              "sale.order.line:91"
+            ],
+            "product_ref": "product:P",
+            "quantity": "1",
+            "price_unit": "105.00",
+            "tax_ref": "account.tax:7",
+            "account_ref": "account:income",
+            "fiscal_position": "FP:standard"
+          }
+        ],
+        "tax_lines": [
+          {
+            "tax_ref": "account.tax:7",
+            "base": "105.00",
+            "amount": "10.50"
+          }
+        ],
+        "journal": "journal:sales",
+        "company": "company:one",
+        "date": "2026-09-05",
+        "access_rights": "allowed",
+        "balanced_lines": true,
+        "posting_errors": [],
+        "odoo_computation": {
+          "invoice_ref": "account.move:70",
+          "revision": "move:r3",
+          "line_refs": [
+            "account.move.line:701"
+          ],
+          "tax_ref": "account.tax:7",
+          "fiscal_position": "FP:standard",
+          "amount_tax": "10.50",
+          "amount_total": "115.50"
+        },
+        "linked_invoice_refs": [
+          "account.move:70"
+        ],
+        "no_other_current_or_posted_invoice": true
+      },
+      "provenance": {
+        "role": "evidence",
+        "fixture": true,
+        "source_records": {
+          "odoo:account.move:70": {
+            "revision": "move:r3",
+            "fingerprint": "16915f97cee4af9487b504996c0eec2c1a4a545a697d296f6d7cb2ac417d072a"
+          },
+          "odoo:sale.order:9": {
+            "revision": "so:r4",
+            "fingerprint": "66860f5dba599ef95d120c72a5108a137eda7f192789c1b5ad30948d7c98d9e9"
+          },
+          "instruction:invoice": {
+            "revision": "policy:r1",
+            "fingerprint": "27889620bb86c4718e1cc34cedca2af4b42cb9533fd687c3f0b4c64c8356f421"
+          }
+        },
+        "scope": "synthetic native-shaped receipt, not live Odoo"
+      }
+    },
+    {
+      "source_id": "account.move:70",
+      "title": "account.move:70",
+      "kind": "record",
+      "content": "",
+      "record_model": "derived.erp_amount_facts",
+      "record_revision": "move:r3",
+      "structured_fields": {
+        "state": "draft",
+        "invoice_role": "downpayment",
+        "order_ref": "sale.order:9",
+        "customer_ref": "customer:C",
+        "mode": "percentage",
+        "downpayment_ratio": "0.1",
+        "order_untaxed_total": "1000.00",
+        "authorized_downpayment_amount": "100.00",
+        "amount_untaxed": "105.00",
+        "amount_tax": "10.50",
+        "amount_total": "115.50",
+        "odoo_amount_tax": "10.50",
+        "currency_tolerance": "0.01",
+        "currency": "USD",
+        "payment_term": "NET30",
+        "tax_basis": "tax excluded VAT 10%; FP:standard"
+      },
+      "provenance": {
+        "role": "evidence",
+        "fixture": true,
+        "source_records": {
+          "odoo:account.move:70": {
+            "revision": "move:r3",
+            "fingerprint": "16915f97cee4af9487b504996c0eec2c1a4a545a697d296f6d7cb2ac417d072a"
+          },
+          "odoo:sale.order:9": {
+            "revision": "so:r4",
+            "fingerprint": "66860f5dba599ef95d120c72a5108a137eda7f192789c1b5ad30948d7c98d9e9"
+          },
+          "instruction:invoice": {
+            "revision": "policy:r1",
+            "fingerprint": "27889620bb86c4718e1cc34cedca2af4b42cb9533fd687c3f0b4c64c8356f421"
+          }
+        },
+        "scope": "synthetic native-shaped receipt, not live Odoo"
+      }
+    }
+  ]
+}

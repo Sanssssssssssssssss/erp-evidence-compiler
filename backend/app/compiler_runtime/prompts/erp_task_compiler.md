@@ -16,6 +16,11 @@ a failed constraint does not create authority to reject the work.
 Do not choose business actions, evaluate their correctness, compute quantities,
 invent CHECKs, or produce evidence/verdicts. Runtime expands the registered
 checks, source requirements and data dependencies into the Executor's DAG.
+Numeric CHECKs expand per target into registered field-bound steps. Runtime
+selects only the declared invoice-mode branch from an admitted amount view and
+combines cancellation predicates with ANY. You do not write formulas, select
+numeric fields, drop failed predicates or ask the Executor to generate missing
+views. Missing numeric inputs are review gaps, not routing failures.
 
 Preserve scenario_id and action IDs. Every selected template must be used. No
 shared node IDs in selected_template_ids. unresolved_manager_inputs is only for

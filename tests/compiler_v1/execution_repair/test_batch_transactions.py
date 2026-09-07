@@ -140,7 +140,9 @@ def test_failed_branch_keeps_maximal_valid_dependency_closure_and_raw_receipt(mo
     runtime, calls, events, _inputs = _runtime(monkeypatch, pack, rejected={"b"})
     result = _run(runtime, plan, proposal, prepared)
     labels = {node.id: node.action_contract.logical_check_id for node in plan.nodes if node.kind == "CHECK"}
-    assert [kind for kind, _revision, _focus in calls] == ["executor", "verifier"]
+    assert [kind for kind, _revision, _focus in calls] == ["executor", "verifier"] * 2
+    assert {labels[item] for item in calls[2][2]} == {"b", "c"}
+    assert result.retry_count == 1
     assert {labels[item] for item in result.checkpoint.completed_check_ids} == {"a", "d"}
     assert {labels[item.check_id] for item in result.artifact.assessments} == {"a", "d"}
     assert result.compile_status == "NON_CONVERGED"
@@ -153,7 +155,7 @@ def test_failed_branch_keeps_maximal_valid_dependency_closure_and_raw_receipt(mo
         "claim:a:r1:current", "claim:d:r1:current",
     }
     rejected = [payload for kind, payload in events if kind == "rejected_candidate"]
-    assert len(rejected) == 1
+    assert len(rejected) == 2
     assert {labels[item] for item in rejected[0]["rejected_check_ids"]} == {"b", "c"}
     assert len(rejected[0]["candidate_artifact"]["assessments"]) == 4
 
@@ -166,7 +168,7 @@ def test_resume_uses_new_revision_only_for_remaining_checks_without_old_candidat
     resumed, calls, events, inputs = _runtime(monkeypatch, pack)
     result = _run(resumed, plan, proposal, prepared, checkpoint=first.checkpoint)
     labels = {node.id: node.action_contract.logical_check_id for node in plan.nodes if node.kind == "CHECK"}
-    assert [kind for kind, _revision, _focus in first_calls] == ["executor", "verifier"]
+    assert [kind for kind, _revision, _focus in first_calls] == ["executor", "verifier"] * 2
     assert [kind for kind, _revision, _focus in calls] == ["executor", "verifier"]
     assert {labels[item] for item in calls[0][2]} == {"b", "c"}
     assert {revision for _kind, revision, _focus in calls} == {2}
@@ -271,3 +273,123 @@ def test_protocol_failure_reports_actual_phase_without_retry_or_committed_change
     assert result.checkpoint.completed_check_ids == first.checkpoint.completed_check_ids
     assert result.compile_status == "NON_CONVERGED"
     assert result.semantic_status is None
+
+
+def test_repair_receives_diagnosis_and_preserves_independent_proof(monkeypatch):
+    plan, proposal, prepared, pack = _case({"a": [], "b": [], "c": ["b"]})
+    rejected = {"b"}
+    runtime, calls, _events, inputs = _runtime(monkeypatch, pack, rejected=rejected)
+    verify, execute = runtime.verify, runtime.execute_plan
+    feedback, sessions = [], []
+
+    def first_rejection(**kwargs):
+        result = verify(**kwargs)
+        rejected.clear()
+        return result
+
+    def capture(**kwargs):
+        feedback.append(kwargs.get("runtime_observations"))
+        sessions.append(kwargs["conversation"].session)
+        return execute(**kwargs)
+
+    monkeypatch.setattr(runtime, "verify", first_rejection)
+    monkeypatch.setattr(runtime, "execute_plan", capture)
+    result = _run(runtime, plan, proposal, prepared)
+    assert result.compile_status == "COMMITTED" and result.semantic_status == "SUPPORTED"
+    assert len(calls) == 4 and result.retry_count == 1
+    assert {term.id for term in inputs[1].binding_proposals} == {"binding:a:r1:current"}
+    assert not feedback[0] and feedback[1][0]["previous_assessment"]["status"] == "NOT_FOUND"
+    assert sessions[1] is None
+
+
+@pytest.mark.parametrize("gap", ["SOURCE_MISSING", "BINDING_MISSING", "WITNESS_MISSING"])
+def test_note_only_proof_gap_repairs_but_true_material_gap_does_not(monkeypatch, gap):
+    plan, proposal, prepared, pack = _case({"a": []})
+    runtime, calls, _events, _inputs = _runtime(monkeypatch, pack)
+    execute, verify = runtime.execute_plan, runtime.verify
+
+    def note_only_first(**kwargs):
+        if calls:
+            return execute(**kwargs)
+        kwargs["model_budget"].consume()
+        focus = list(kwargs["focus_check_id"])
+        calls.append(("executor", runtime.current_revision, focus))
+        candidate = copy.deepcopy(kwargs["sandbox"])
+        assert candidate.submit_check(check_id=focus[0], claim_ids=[], binding_proposals=[],
+                                      witness_ids=[], note="Unable to establish the required fact.")["ok"]
+        kwargs["conversation"].sandbox = candidate
+        return ExecutorSummary(unresolved_check_ids=focus), candidate
+
+    def diagnose(**kwargs):
+        items = verify(**kwargs)
+        if len(calls) == 2:
+            return [item.model_copy(update={"status": "NOT_FOUND", "gap_code": gap,
+                     "reason": "Independent source review.", "missing_fact": "Exact required fact or proof term."})
+                    for item in items]
+        return items
+
+    monkeypatch.setattr(runtime, "execute_plan", note_only_first)
+    monkeypatch.setattr(runtime, "verify", diagnose)
+    result = _run(runtime, plan, proposal, prepared)
+    assert result.compile_status == "COMMITTED"
+    assert len(calls) == (2 if gap == "SOURCE_MISSING" else 4)
+    assert result.semantic_status == ("NOT_FOUND" if gap == "SOURCE_MISSING" else "SUPPORTED")
+
+
+def test_plan_objection_sees_global_context_and_stops_without_repair(monkeypatch):
+    from app.compiler_runtime.runtime import EvidenceVerificationBatch
+    from app.compiler_runtime.sandbox import SourceRecord
+    import hashlib
+
+    plan, proposal, prepared, pack = _case({"a": [], "b": []})
+    extra = SourceRecord(source_id="unrouted", title="Extra original", kind="document",
+                         content="An explicitly required approval must also cover the recipient.")
+    prepared.append(PreparedSource(record=extra, metadata={
+        "source_fingerprint": hashlib.sha256(extra.content.encode()).hexdigest(),
+    }))
+    runtime, calls, events, _inputs = _runtime(monkeypatch, pack)
+    monkeypatch.setattr(runtime, "verify", EvidenceCompilerRuntime.verify.__get__(runtime))
+    packets = []
+
+    def object_to_plan(**kwargs):
+        if kwargs.get("model_budget"):
+            kwargs["model_budget"].consume()
+        packets.append(kwargs["payload"])
+        return EvidenceVerificationBatch(assessments=[], plan_issue="Required recipient approval is unrouted.")
+
+    monkeypatch.setattr(runtime, "_run_phase", object_to_plan)
+    result = _run(runtime, plan, proposal, prepared)
+    assert len(calls) == 1 and len(packets) == 1
+    assert {s["source_id"] for s in packets[0]["sources"]} == {s.record.source_id for s in prepared}
+    assert packets[0]["review_plan"]["roots"] == plan.roots
+    assert len(packets[0]["review_plan"]["nodes"]) == len(plan.nodes)
+    assert not result.artifact.assessments and not result.artifact.binding_proposals
+    assert result.compile_status == "NON_CONVERGED" and result.retry_count == 0
+    rejected = [p for k, p in events if k == "rejected_candidate"]
+    assert rejected[0]["status"] == "plan_review_required"
+    assert "recipient approval" in rejected[0]["error"]
+    from app.compiler_runtime.runtime import CompilerSupervisionPause, _initial_sandbox
+    with pytest.raises(CompilerSupervisionPause):
+        runtime.verify(plan=plan, sandbox=_initial_sandbox(plan=plan, prepared_sources=prepared,
+                       policy_excerpt=pack.policy), policy_excerpt=pack.policy, focus_check_id=plan.nodes[0].id)
+    assert len(packets[1]["checks"]) == 1
+    assert packets[1]["review_plan"] == packets[0]["review_plan"]
+    assert packets[1]["sources"] == packets[0]["sources"]
+
+
+@pytest.mark.parametrize("failed_stage", ["execute_plan", "verify"])
+def test_protocol_failure_during_repair_keeps_first_pass_valid_closure(monkeypatch, failed_stage):
+    plan, proposal, prepared, pack = _case({"a": [], "b": []})
+    runtime, calls, _events, _inputs = _runtime(monkeypatch, pack, rejected={"b"})
+    method = getattr(runtime, failed_stage)
+
+    def fail_on_repair(**kwargs):
+        if len(kwargs["focus_check_id"]) == 1:
+            raise ModelBehaviorError("Injected incomplete repair response")
+        return method(**kwargs)
+
+    monkeypatch.setattr(runtime, failed_stage, fail_on_repair)
+    result = _run(runtime, plan, proposal, prepared)
+    assert result.compile_status == "NON_CONVERGED" and result.retry_count == 1
+    assert {term.id for term in result.artifact.binding_proposals} == {"binding:a:r1:current"}
+    assert len(calls) == (2 if failed_stage == "execute_plan" else 3)

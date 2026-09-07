@@ -96,7 +96,7 @@ PROMPT_VERSIONS = {
     "registered_executor": "registered_action_executor_v2",
     "registered_verifier": "registered_action_verifier_v1",
     "evidence_executor": "bounded_evidence_executor_v8_applicable_evidence",
-    "evidence_verifier": "bounded_evidence_verifier_v7_applicable_evidence",
+    "evidence_verifier": "bounded_evidence_verifier_v8_global_review",
     "erp_task_compiler": "source_bound_erp_compiler_v3_atomic_routing",
     "verifier": "typed_fine_verifier_v30",
 }
@@ -222,6 +222,7 @@ class EvidenceAssessment(_RuntimeModel):
 
 class EvidenceVerificationBatch(_RuntimeModel):
     assessments: list[EvidenceAssessment]
+    plan_issue: str = ""
 
 
 def _expand_verified_closures(batch: EvidenceVerificationBatch, checks: Sequence[Mapping[str, Any]]) -> VerificationBatch:
@@ -1607,7 +1608,7 @@ class EvidenceCompilerRuntime:
                 if contract is not None
                 for source_id in contract.source_refs
             }
-            if registered_lane
+            if registered_lane and not evidence_lane
             else set(sandbox.evidence_ir.source_ids)
         )
         sources = [
@@ -1695,6 +1696,24 @@ class EvidenceCompilerRuntime:
         }
         if evidence_lane:
             payload["review_objective"] = plan.objective
+            payload["review_plan"] = {
+                "roots": plan.roots,
+                "nodes": [
+                    {"id": node.id, "kind": node.kind, "statement": node.statement,
+                     "depends_on": node.depends_on, "upstream_check_ids": node.upstream_check_ids,
+                     "action_scope": ({"action_id": node.action_contract.owner_action_id,
+                                       "action_kind": node.action_contract.action_kind,
+                                       "target_record_refs": node.action_contract.target_record_refs,
+                                       "source_refs": node.action_contract.source_refs}
+                                      if isinstance(node.action_contract, ERPReviewContract) else None)}
+                    for node in plan.nodes
+                ],
+            }
+            payload["proposal_records"] = list({
+                (record.action_id, record.record_ref): record.model_dump(mode="json")
+                for node in plan.nodes if isinstance(node.action_contract, ERPReviewContract)
+                for record in node.action_contract.proposal_records
+            }.values())
             upstream_ids = {item for key in requested_check_ids for item in _transitive_upstream_check_ids(plan, key)}
             payload["upstream_evidence"] = _submitted_proof_terms(sandbox, check_ids=upstream_ids)
         batch = self._run_phase(
@@ -1708,6 +1727,10 @@ class EvidenceCompilerRuntime:
             model_budget=model_budget,
         )
         if evidence_lane:
+            if batch.plan_issue.strip():
+                raise CompilerSupervisionPause({
+                    "status": "plan_review_required", "message": batch.plan_issue,
+                })
             batch = _expand_verified_closures(batch, checks)
         expected = {item["id"] for item in checks}
         actual = [item.check_id for item in batch.assessments]
@@ -2575,6 +2598,7 @@ class EvidenceCompilerRuntime:
         proof: CompiledProof,
         executor_session: Any | None = None,
         initial_feedback: Sequence[dict[str, Any]] = (),
+        allow_repair: bool = True,
     ) -> tuple[
         EvidenceSandbox,
         list[CheckAssessment],
@@ -2583,7 +2607,7 @@ class EvidenceCompilerRuntime:
         int,
         bool,
     ]:
-        """One Executor/Verifier pair; commit the maximal valid dependency closure."""
+        """Commit valid closure, with at most one focused evidence proof repair."""
 
         focused = list(check_ids)
         committed_assessments = list(assessments)
@@ -2642,12 +2666,15 @@ class EvidenceCompilerRuntime:
             MaxTurnsExceeded,
             ModelBehaviorError,
             UserError,
+            CompilerSupervisionPause,
         ) as exc:
+            pause = exc.payload if isinstance(exc, CompilerSupervisionPause) else {}
             self._progress(
-                "rejected_candidate", stage=active_phase, status="protocol_failure",
-                action="候选协议未完成，原始证据保留",
+                "rejected_candidate", stage=active_phase,
+                status=pause.get("status", "protocol_failure"),
+                action="计划需要重新审查" if pause else "候选协议未完成，原始证据保留",
                 public_reason="不自动重跑语义阶段；本 revision 停在已提交边界。",
-                error_type=type(exc).__name__, error=str(exc),
+                error_type=type(exc).__name__, error=pause.get("message", str(exc)),
                 evidence_ir=conversation.sandbox.evidence_ir.model_dump(mode="json"),
                 bindings=[item.model_dump(mode="json") for item in conversation.sandbox.binding_proposals],
                 witnesses=[item.model_dump(mode="json") for item in conversation.sandbox.calculation_witnesses],
@@ -2739,7 +2766,7 @@ class EvidenceCompilerRuntime:
         if rejected_ids:
             self._progress(
                 "rejected_candidate", stage="proof_kernel", status="proof_repair_required",
-                action="未通过的候选已封存，等待下一 revision 修复",
+                action="未通过的候选已封存，仅保留有效证明",
                 public_reason="仅提交通过三道门且依赖闭合的 CHECK；失败候选不进入活动证明。",
                 rejected_check_ids=sorted(rejected_ids),
                 candidate_artifact=candidate_artifact.model_dump(mode="json"),
@@ -2780,6 +2807,26 @@ class EvidenceCompilerRuntime:
             committed_check_ids=[key for key in focused if key in ready],
             model_calls_used=2 - model_budget.remaining,
         )
+        if rejected_ids and allow_repair and all(
+            isinstance(nodes[key].action_contract, ERPReviewContract)
+            and nodes[key].action_contract.execution_mode == "evidence_review"
+            for key in focused
+        ):
+            repair_ids = [key for key in focused if key in rejected_ids]
+            self._progress(
+                "model_thinking", stage="executor", status="proof_repair_started",
+                action="Executor 根据复核诊断进行一次定向返工",
+                public_reason="保留已提交证明，用新上下文重做失败及受阻 CHECK；再次复核后停止。",
+                focused_check_ids=repair_ids, repair_attempt=1,
+            )
+            repaired = self._run_registered_batch_frontier(
+                plan=plan, check_ids=repair_ids, prepared_sources=prepared_sources,
+                policy_excerpt=policy_excerpt, requirement_requiredness=requirement_requiredness,
+                sandbox=candidate_sandbox, assessments=candidate_assessments,
+                artifact=candidate_artifact, proof=candidate_proof,
+                initial_feedback=failures, allow_repair=False,
+            )
+            return (*repaired[:4], repaired[4] + 1, repaired[5])
         return (
             candidate_sandbox,
             candidate_assessments,
@@ -3932,7 +3979,7 @@ def _verifier_rejected_latest_submission(
     sandbox: EvidenceSandbox,
     assessment: CheckAssessment,
 ) -> dict[str, Any] | None:
-    """Return exact repair feedback when NOT_FOUND masks a rejected typed attempt."""
+    """Distinguish an inadequate proof attempt from an actual evidence gap."""
 
     if assessment.status != "NOT_FOUND":
         return None
@@ -3942,6 +3989,12 @@ def _verifier_rejected_latest_submission(
     )
     if submission is None:
         return None
+    if assessment.gap_code in {"BINDING_MISSING", "WITNESS_MISSING"}:
+        return _frontier_feedback(
+            assessment.check_id, code="VERIFIER_PROOF_REPAIR_REQUIRED",
+            message="Verifier found an incomplete proof despite available materials. Re-examine the original evidence and diagnosis; repair the proof or explain a genuine source gap.",
+            previous_assessment=assessment,
+        )
     rejected_bindings = sorted(set(submission.binding_ids) - set(assessment.accepted_binding_ids))
     rejected_witnesses = sorted(set(submission.witness_ids) - set(assessment.accepted_witness_ids))
     if not rejected_bindings and not rejected_witnesses:
